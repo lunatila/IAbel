@@ -1,0 +1,73 @@
+# IAbel Backend - Python 3.12 Compatible Dependencies
+# Enhanced RAG System for Reservoir Engineering
+
+# Core FastAPI (Latest stable versions)
+fastapi==0.108.0
+uvicorn[standard]==0.25.0
+python-multipart==0.0.6
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Enhanced PDF Processing (Python 3.12 compatible)
+pdfplumber==0.11.7
+
+# Enhanced Embeddings & Vector Store (Updated for Python 3.12)
+sentence-transformers==3.0.1
+chromadb==0.5.11
+qdrant-client==1.11.3
+numpy==1.26.4
+scipy==1.14.1
+
+# Local LLM Integration (Ollama - Updated)
+requests==2.31.0
+httpx==0.26.0
+
+# External LLM Integration (Optional - Updated)
+openai==1.12.0
+anthropic==0.8.1
+
+# Caching & Performance (Updated)
+redis==5.0.1
+hiredis==2.2.3
+
+# Database (Updated)
+sqlalchemy==2.0.25
+alembic==1.13.1
+
+# Enhanced Utils & Monitoring (Updated)
+python-dotenv==1.0.0
+loguru==0.7.2
+
+# WebSocket Support
+websockets==12.0
+
+# Text Processing & NLP (Python 3.12 compatible - Updated)
+transformers==4.44.2
+torch==2.5.1+cpu --find-links https://download.pytorch.org/whl/torch_stable.html
+tokenizers==0.19.1
+
+# LoRA Fine-tuning & PEFT (Parameter-Efficient Fine-Tuning)
+peft==0.7.1
+bitsandbytes==0.42.0
+accelerate==0.25.0
+datasets==2.16.1
+evaluate==0.4.1
+
+# Data Processing (Updated)
+pandas==2.2.0
+setuptools==69.0.3
+wheel==0.42.0
+
+# Development & Testing (Updated)
+pytest==7.4.4
+pytest-asyncio==0.23.2
+black==23.12.1
+flake8==7.0.0
+
+# Production Deployment (Updated)
+gunicorn==21.2.0
+python-json-logger==2.0.7
+
+# Additional stability packages
+packaging==23.2
+typing-extensions==4.9.0
