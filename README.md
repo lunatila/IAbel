@@ -36,7 +36,7 @@ ChatGPT-style interface with real-time status indicators and RAG version selecto
 
 ### Chat with Citations
 
-Response with **95% confidence score**, context extracted from indexed documents and automatic academic references.
+Response with **96% confidence score**, context extracted from indexed documents and automatic academic references.
 
 ![Chat](docs/screenshots/chat.png)
 
