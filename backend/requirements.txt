@@ -10,6 +10,7 @@ pydantic-settings==2.1.0
 
 # Enhanced PDF Processing (Python 3.12 compatible)
 pdfplumber==0.11.7
+pymupdf>=1.23.0
 
 # Enhanced Embeddings & Vector Store (Updated for Python 3.12)
 sentence-transformers==3.0.1

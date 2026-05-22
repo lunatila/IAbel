@@ -137,8 +137,10 @@ class EnhancedRAGService(LoggerMixin):
                 print(f"⚠️ Failed to initialize RAG v3 System: {e}")
                 self.rag_v3_system = None
 
-        # Conversation storage (in production, use Redis)
-        self.conversations = {}
+        # Conversation storage — capped at 100 sessions (LRU eviction)
+        from collections import OrderedDict
+        self.conversations: OrderedDict = OrderedDict()
+        self._MAX_CONVERSATIONS = 100
         
         # Initialize cache service
         self.cache = get_cache_service()
@@ -158,6 +160,14 @@ class EnhancedRAGService(LoggerMixin):
             self.log_error("RAG Service Initialization", e)
             self.error_tracker.track_error(e, {"component": "service_init"})
     
+    def _ensure_conversation_slot(self, conversation_id: str) -> None:
+        """Create conversation slot, evicting the oldest session if at capacity."""
+        if conversation_id not in self.conversations:
+            if len(self.conversations) >= self._MAX_CONVERSATIONS:
+                self.conversations.popitem(last=False)
+            self.conversations[conversation_id] = []
+        self.conversations.move_to_end(conversation_id)
+
     def _initialize_system(self) -> bool:
         """
         Initialize the RAG system with existing PDFs
@@ -320,8 +330,7 @@ class EnhancedRAGService(LoggerMixin):
                 )
             
             # Store conversation (in production, use Redis with TTL)
-            if conversation_id not in self.conversations:
-                self.conversations[conversation_id] = []
+            self._ensure_conversation_slot(conversation_id)
             
             self.conversations[conversation_id].append({
                 'timestamp': datetime.now().isoformat(),
@@ -423,8 +432,7 @@ class EnhancedRAGService(LoggerMixin):
             }
             
             # Store conversation
-            if conversation_id not in self.conversations:
-                self.conversations[conversation_id] = []
+            self._ensure_conversation_slot(conversation_id)
             
             self.conversations[conversation_id].append({
                 'timestamp': datetime.now().isoformat(),
@@ -504,8 +512,7 @@ class EnhancedRAGService(LoggerMixin):
             )
 
             # Store conversation
-            if conversation_id not in self.conversations:
-                self.conversations[conversation_id] = []
+            self._ensure_conversation_slot(conversation_id)
 
             self.conversations[conversation_id].append({
                 'timestamp': datetime.now().isoformat(),
@@ -545,6 +552,70 @@ class EnhancedRAGService(LoggerMixin):
                 'error': str(e),
                 'timestamp': datetime.now().isoformat()
             }
+
+    async def ask_question_v3_stream(self,
+                                     question: str,
+                                     conversation_id: Optional[str] = None,
+                                     top_k: int = 8,
+                                     include_sources: bool = True) -> AsyncIterator[Dict[str, Any]]:
+        """Stream RAG v3 response with real token-level streaming."""
+        if not self.rag_v3_system:
+            yield {
+                'type': 'complete',
+                'answer': "RAG v3 system is not available.",
+                'confidence': 0.0,
+                'conversation_id': conversation_id or str(uuid.uuid4()),
+                'total_sources': 0,
+                'generation_mode': 'rag_v3',
+                'enhanced': True,
+            }
+            return
+
+        if not conversation_id:
+            conversation_id = str(uuid.uuid4())
+
+        yield {'type': 'start', 'conversation_id': conversation_id}
+
+        full_answer = ""
+        final_chunk = None
+
+        try:
+            async for chunk in self.rag_v3_system.ask_question_stream(
+                question=question,
+                top_k=top_k,
+                include_sources=include_sources
+            ):
+                if chunk.get('type') == 'token':
+                    full_answer += chunk.get('content', '')
+                    yield chunk
+                elif chunk.get('type') == 'complete':
+                    # Buffer complete — enrich before yielding
+                    final_chunk = chunk
+                else:
+                    yield chunk
+
+        except Exception as e:
+            self.log_error("rag_v3_stream", e, question=question)
+            yield {
+                'type': 'error',
+                'message': str(e),
+                'conversation_id': conversation_id,
+            }
+            return
+
+        # Persist conversation then yield enriched complete chunk
+        if final_chunk:
+            self._ensure_conversation_slot(conversation_id)
+            self.conversations[conversation_id].append({
+                'timestamp': datetime.now().isoformat(),
+                'question': question,
+                'answer': full_answer,
+                'confidence': final_chunk.get('confidence', 0.0),
+                'sources_count': final_chunk.get('total_sources', 0),
+            })
+            final_chunk['conversation_id'] = conversation_id
+            final_chunk['timestamp'] = datetime.now().isoformat()
+            yield final_chunk
 
     async def stream_response(self, 
                              question: str,
@@ -647,8 +718,7 @@ class EnhancedRAGService(LoggerMixin):
             }
             
             # Store conversation
-            if conversation_id not in self.conversations:
-                self.conversations[conversation_id] = []
+            self._ensure_conversation_slot(conversation_id)
             
             self.conversations[conversation_id].append({
                 'timestamp': datetime.now().isoformat(),

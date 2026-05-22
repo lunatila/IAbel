@@ -6,6 +6,7 @@ Otimizado para textos técnicos de engenharia de reservatórios
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 import os
 import pickle
 import torch
@@ -14,7 +15,7 @@ import re
 class LocalEmbedder:
     def __init__(self, 
                  model_name: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-                 cache_dir: str = "./models_cache"):
+                 cache_dir: str = str(Path(__file__).parent.parent / "models_cache")):
         """
         Inicializa o embedder local
         

@@ -5,7 +5,7 @@ Provides structured logging with different levels and output formats
 
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 from typing import Dict, Any, List
@@ -18,7 +18,7 @@ class JSONFormatter(logging.Formatter):
     
     def format(self, record):
         log_data = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'level': record.levelname,
             'logger': record.name,
             'message': record.getMessage(),
@@ -250,7 +250,7 @@ class ErrorTracker:
         
         # Add to recent errors
         error_info = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'type': error_type,
             'message': str(error),
             'context': context or {}

@@ -114,40 +114,42 @@ class AcademicCitationExtractor:
     
     def extract_from_pdf_metadata(self, pdf_path: str) -> Optional[AcademicReference]:
         """Extrai informações dos metadados do PDF"""
-        # Validate PDF path
-        if not pdf_path or not pdf_path.strip():
+        import os
+        if not pdf_path or not pdf_path.strip() or not os.path.exists(pdf_path):
             return None
-            
+
+        # Try PyMuPDF first (reads structured Info dict)
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            meta = doc.metadata
+            title = (meta.get('title') or '').strip()
+            author = (meta.get('author') or '').strip()
+            doc.close()
+            if title and author:
+                authors = self._parse_authors(author)
+                doc_type = self._detect_document_type(title, '')
+                return AcademicReference(authors=authors, title=title, type=doc_type)
+        except Exception:
+            pass
+
+        # Fallback to pdfplumber
         try:
             import pdfplumber
-            import os
-            
-            # Check if file exists
-            if not os.path.exists(pdf_path):
-                return None
-            
             with pdfplumber.open(pdf_path) as pdf:
                 if hasattr(pdf, 'metadata') and pdf.metadata:
                     metadata = pdf.metadata
-                    
-                    # Extract basic info from metadata
                     title = metadata.get('Title', '')
                     author = metadata.get('Author', '')
                     subject = metadata.get('Subject', '')
-                    creator = metadata.get('Creator', '')
-                    
                     if title and author:
                         authors = self._parse_authors(author)
                         doc_type = self._detect_document_type(title, subject)
-                        
-                        return AcademicReference(
-                            authors=authors,
-                            title=title,
-                            type=doc_type
-                        )
+                        return AcademicReference(authors=authors, title=title, type=doc_type)
         except Exception as e:
-            print(f"Error extracting PDF metadata: {e}")
-        
+            import logging
+            logging.getLogger(__name__).warning("PDF metadata extraction failed for %s: %s", pdf_path, e)
+
         return None
     
     def extract_from_first_page(self, first_page_text: str, filename: str) -> AcademicReference:
@@ -263,10 +265,10 @@ class AcademicCitationExtractor:
         """Parse author string from metadata"""
         if not author_string:
             return []
-        
-        # Split by common separators
-        authors = re.split(r'[,;&]|\s+and\s+|\s+e\s+', author_string)
-        return [self._clean_author_name(author.strip()) for author in authors if author.strip()]
+
+        authors = re.split(r'[;&]|\s+and\s+|\s+e\s+', author_string)
+        cleaned = [self._clean_author_name(a.strip()) for a in authors if a.strip()]
+        return cleaned[:5]
     
     def _clean_author_name(self, name: str) -> str:
         """Limpa nome do autor"""

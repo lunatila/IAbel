@@ -5,169 +5,110 @@ Sistema de LLM via API do Google para engenharia de reservatórios
 
 import os
 import json
+import logging
+import time
 from typing import Dict, List, Any, Optional
+
 import requests
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+_RETRYABLE_CODES = {429, 503, 502, 504}
+_RATE_LIMIT_MSG = (
+    "The API rate limit has been reached. Please wait a moment before sending another question. "
+    "(Free tier: 15 requests/minute)"
+)
+
 
 class GeminiClient:
     def __init__(self,
                  api_key: Optional[str] = None,
                  model_name: str = "gemini-2.0-flash-exp",
                  timeout: int = 60):
-        """
-        Inicializa cliente Google Gemini
-
-        Args:
-            api_key: Chave API do Google (ou None para usar variável de ambiente)
-            model_name: Nome do modelo Gemini (ex: gemini-2.0-flash-exp, gemini-1.5-pro)
-            timeout: Timeout para requisições em segundos
-        """
-        # Busca API key
         self.api_key = api_key or os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
 
         if not self.api_key:
             raise ValueError(
                 "API Key do Google não encontrada. "
-                "Configure a variável de ambiente GOOGLE_API_KEY ou GEMINI_API_KEY, "
-                "ou passe api_key no construtor."
+                "Configure a variável de ambiente GOOGLE_API_KEY ou GEMINI_API_KEY."
             )
 
         self.model_name = model_name
         self.timeout = timeout
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
-        print(f"✅ Google Gemini configurado: {model_name}")
+        logger.info("Google Gemini configurado: %s", model_name)
 
     def generate_response(self,
-                         prompt: str,
-                         system_prompt: Optional[str] = None,
-                         max_tokens: int = 2000,
-                         temperature: float = 0.3,
-                         stream: bool = False) -> str:
-        """
-        Gera resposta usando Gemini API
-
-        Args:
-            prompt: Pergunta/prompt do usuário
-            system_prompt: Instruções do sistema (contexto)
-            max_tokens: Número máximo de tokens na resposta
-            temperature: Temperatura da geração (0.0 = determinístico, 1.0 = criativo)
-            stream: Se deve retornar resposta em streaming
-
-        Returns:
-            Resposta gerada pelo modelo
-        """
-        try:
-            # Combina system prompt com user prompt
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
-
-            # Monta payload para API
-            url = f"{self.base_url}/models/{self.model_name}:generateContent"
-
-            payload = {
-                "contents": [{
-                    "parts": [{
-                        "text": full_prompt
-                    }]
-                }],
-                "generationConfig": {
-                    "temperature": temperature,
-                    "maxOutputTokens": max_tokens,
-                    "topP": 0.95,
-                    "topK": 40
-                }
+                          prompt: str,
+                          system_prompt: Optional[str] = None,
+                          max_tokens: int = 2000,
+                          temperature: float = 0.3,
+                          stream: bool = False) -> str:
+        url = f"{self.base_url}/models/{self.model_name}:generateContent"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                "topP": 0.95,
+                "topK": 40
             }
+        }
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
 
-            # Faz requisição
-            headers = {
-                "Content-Type": "application/json"
-            }
-
-            params = {
-                "key": self.api_key
-            }
-
+        last_error = None
+        for attempt in range(3):
             response = requests.post(
                 url,
-                headers=headers,
-                params=params,
+                headers={"Content-Type": "application/json"},
+                params={"key": self.api_key},
                 json=payload,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
+            if response.status_code == 200:
+                return self._extract_text(response.json())
+            if response.status_code in _RETRYABLE_CODES:
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                logger.warning("Gemini %s on attempt %d, retrying in %ds…", response.status_code, attempt + 1, wait)
+                time.sleep(wait)
+                last_error = response.status_code
+                continue
+            try:
+                detail = response.json()
+            except Exception:
+                detail = response.text
+            raise RuntimeError(f"Gemini API error {response.status_code}: {detail}")
 
-            if response.status_code != 200:
-                error_msg = f"Erro na API Gemini: {response.status_code}"
-                try:
-                    error_detail = response.json()
-                    error_msg += f" - {error_detail}"
-                except:
-                    error_msg += f" - {response.text}"
-                raise Exception(error_msg)
+        raise RuntimeError(_RATE_LIMIT_MSG)
 
-            # Extrai resposta
-            result = response.json()
-
-            if 'candidates' not in result or len(result['candidates']) == 0:
-                raise Exception("Nenhuma resposta gerada pelo modelo")
-
-            # Tenta extrair texto de diferentes formatos de resposta
-            candidate = result['candidates'][0]
-
-            # Formato 1: content.parts[0].text
-            if 'content' in candidate and 'parts' in candidate['content']:
-                parts = candidate['content']['parts']
-                if len(parts) > 0 and 'text' in parts[0]:
-                    return parts[0]['text'].strip()
-
-            # Formato 2: parts[0].text (direto)
-            if 'parts' in candidate:
-                parts = candidate['parts']
-                if len(parts) > 0 and 'text' in parts[0]:
-                    return parts[0]['text'].strip()
-
-            # Formato 3: text direto
-            if 'text' in candidate:
-                return candidate['text'].strip()
-
-            raise Exception(f"Formato de resposta não reconhecido: {candidate}")
-
-        except Exception as e:
-            print(f"❌ Erro ao gerar resposta com Gemini: {e}")
-            raise
+    def _extract_text(self, result: dict) -> str:
+        """Extract generated text from a Gemini API response dict."""
+        candidates = result.get("candidates", [])
+        if not candidates:
+            raise RuntimeError("Nenhuma resposta gerada pelo modelo")
+        content = candidates[0].get("content", {})
+        parts = content.get("parts", candidates[0].get("parts", []))
+        if parts and "text" in parts[0]:
+            return parts[0]["text"].strip()
+        if "text" in candidates[0]:
+            return candidates[0]["text"].strip()
+        raise RuntimeError(f"Formato de resposta não reconhecido: {candidates[0]}")
 
     def generate_with_context(self,
-                            question: str,
-                            context_documents: List[str] = None,
-                            contexts: List[str] = None,
-                            max_context_length: int = 3000,
-                            max_tokens: int = 2000,
-                            temperature: float = 0.3) -> str:
-        """
-        Gera resposta com contextos do RAG
-
-        Args:
-            question: Pergunta do usuário
-            context_documents: Lista de contextos relevantes do RAG (novo formato)
-            contexts: Lista de contextos relevantes do RAG (formato legado)
-            max_context_length: Tamanho máximo do contexto (ignorado - compatibilidade)
-            max_tokens: Número máximo de tokens
-            temperature: Temperatura da geração
-
-        Returns:
-            Resposta gerada
-        """
-        # Aceita ambos os formatos de contexto
+                              question: str,
+                              context_documents: List[str] = None,
+                              contexts: List[str] = None,
+                              max_context_length: int = 3000,
+                              max_tokens: int = 2000,
+                              temperature: float = 0.3) -> str:
         ctx_list = context_documents or contexts or []
-
-        # Monta contexto formatado
         context_text = "\n\n".join([
-            f"[Documento {i+1}]\n{ctx}"
-            for i, ctx in enumerate(ctx_list)
+            f"[Documento {i+1}]\n{ctx}" for i, ctx in enumerate(ctx_list)
         ])
 
-        # System prompt especializado para engenharia de reservatórios
         system_prompt = f"""Você é um assistente especializado em Engenharia de Reservatórios de Petróleo.
 Sua função é responder perguntas técnicas com base nos documentos fornecidos.
 
@@ -187,107 +128,110 @@ INSTRUÇÕES:
             prompt=question,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
-            temperature=temperature
+            temperature=temperature,
         )
 
+    async def generate_response_stream(self,
+                                       prompt: str,
+                                       system_prompt: Optional[str] = None,
+                                       max_tokens: int = 2000,
+                                       temperature: float = 0.7):
+        """
+        Gera resposta em streaming real via SSE do endpoint streamGenerateContent.
+        Yields text chunks as they arrive from the API.
+        """
+        import asyncio
+
+        url = f"{self.base_url}/models/{self.model_name}:streamGenerateContent"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                "topP": 0.95,
+                "topK": 40,
+            }
+        }
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+        last_status = None
+        for attempt in range(3):
+            response = requests.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                params={"key": self.api_key, "alt": "sse"},
+                json=payload,
+                timeout=self.timeout,
+                stream=True,
+            )
+            if response.status_code in _RETRYABLE_CODES:
+                wait = 2 ** attempt
+                logger.warning("Gemini stream %s on attempt %d, retrying in %ds…", response.status_code, attempt + 1, wait)
+                time.sleep(wait)
+                last_status = response.status_code
+                continue
+            if response.status_code != 200:
+                try:
+                    detail = response.json()
+                except Exception:
+                    detail = response.text
+                raise RuntimeError(f"Gemini API error {response.status_code}: {detail}")
+
+            # Successful response — stream tokens
+            try:
+                for raw_line in response.iter_lines(decode_unicode=True):
+                    if not raw_line or not raw_line.startswith("data: "):
+                        continue
+                    json_str = raw_line[6:]
+                    if json_str.strip() == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(json_str)
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            for part in parts:
+                                text = part.get("text", "")
+                                if text:
+                                    yield text
+                                    await asyncio.sleep(0)
+                    except json.JSONDecodeError as e:
+                        logger.debug("Skipping malformed SSE chunk: %s", e)
+                        continue
+            except Exception as e:
+                logger.error("Gemini streaming failed: %s", e)
+                raise
+            return  # stream finished cleanly
+
+        raise RuntimeError(_RATE_LIMIT_MSG)
+
     def is_ollama_running(self) -> bool:
-        """
-        Compatibilidade com OllamaClient - sempre retorna True para Gemini
-        """
         return True
 
     def is_available(self) -> bool:
-        """
-        Verifica se o cliente Gemini está disponível
-
-        Returns:
-            True se API key configurada
-        """
         return self.api_key is not None
 
     def test_connection(self) -> bool:
-        """
-        Testa conexão com a API
-
-        Returns:
-            True se conectado com sucesso
-        """
         try:
             response = self.generate_response(
                 prompt="Diga 'OK' se você estiver funcionando.",
                 max_tokens=10
             )
-            print(f"✅ Teste de conexão bem-sucedido: {response}")
+            logger.info("Teste de conexão bem-sucedido: %s", response)
             return True
         except Exception as e:
-            print(f"❌ Falha no teste de conexão: {e}")
+            logger.error("Falha no teste de conexão: %s", e)
             return False
 
-    async def generate_response_stream(self,
-                                prompt: str,
-                                system_prompt: Optional[str] = None,
-                                max_tokens: int = 2000,
-                                temperature: float = 0.7):
-        """
-        Gera resposta em streaming (simulado para compatibilidade)
-
-        Nota: Gemini API não suporta streaming nativo na versão atual,
-        então retornamos a resposta completa de uma vez.
-
-        Args:
-            prompt: Prompt do usuário
-            system_prompt: Prompt do sistema
-            max_tokens: Número máximo de tokens
-            temperature: Temperatura da geração
-
-        Yields:
-            Chunks da resposta
-        """
-        import asyncio
-
-        # Gera resposta completa
-        response = self.generate_response(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
-
-        # Simula streaming dividindo em palavras
-        words = response.split()
-        chunk_size = 5  # Palavras por chunk
-
-        for i in range(0, len(words), chunk_size):
-            chunk = ' '.join(words[i:i + chunk_size])
-            if i + chunk_size < len(words):
-                chunk += ' '
-            yield chunk
-            await asyncio.sleep(0)  # Yield control to event loop
-
     def get_status(self) -> Dict[str, Any]:
-        """
-        Retorna status do cliente
-
-        Returns:
-            Dicionário com informações de status
-        """
         return {
             "model": self.model_name,
             "status": "connected" if self.api_key else "not configured",
             "provider": "Google Gemini",
-            "base_url": self.base_url
+            "base_url": self.base_url,
         }
 
 
-# Função helper para criar cliente facilmente
 def create_gemini_client(model_name: str = "gemini-2.0-flash-exp") -> GeminiClient:
-    """
-    Cria e retorna um cliente Gemini configurado
-
-    Args:
-        model_name: Nome do modelo a usar
-
-    Returns:
-        Cliente Gemini configurado
-    """
     return GeminiClient(model_name=model_name)

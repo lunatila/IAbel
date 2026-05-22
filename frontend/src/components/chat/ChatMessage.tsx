@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { User, Clock, Zap } from 'lucide-react';
+import { InlineMath, BlockMath } from 'react-katex';
+import 'katex/dist/katex.min.css';
 import { Message, Source } from '../../types';
 import Badge from '../ui/Badge';
 import { FeedbackRating } from '../feedback/FeedbackRating';
@@ -8,6 +10,54 @@ import { EnhancedInfoDisplay } from '../enhanced/EnhancedInfoDisplay';
 import { CitationDisplay } from '../enhanced/CitationDisplay';
 import { apiService } from '../../services/api';
 import chatIcon from '../../images/IAbel_cigarro.png';
+
+function renderMessageContent(content: string): React.ReactNode {
+  const nodes: React.ReactNode[] = [];
+  let key = 0;
+
+  // Split on $$...$$ for block math
+  const blockSegments = content.split(/(\$\$[\s\S]*?\$\$)/g);
+
+  for (const blockSeg of blockSegments) {
+    if (blockSeg.startsWith('$$') && blockSeg.endsWith('$$') && blockSeg.length > 4) {
+      const math = blockSeg.slice(2, -2).trim();
+      try {
+        nodes.push(<div key={key++} className="my-3 overflow-x-auto"><BlockMath math={math} /></div>);
+      } catch {
+        nodes.push(<code key={key++} className="text-sm bg-gray-100 dark:bg-gray-800 px-1 rounded">{blockSeg}</code>);
+      }
+      continue;
+    }
+
+    // Split on $...$ for inline math (no newlines inside)
+    const inlineSegments = blockSeg.split(/(\$[^$\n]+?\$)/g);
+
+    for (const inlineSeg of inlineSegments) {
+      if (inlineSeg.startsWith('$') && inlineSeg.endsWith('$') && inlineSeg.length > 2) {
+        const math = inlineSeg.slice(1, -1).trim();
+        try {
+          nodes.push(<InlineMath key={key++} math={math} />);
+        } catch {
+          nodes.push(<code key={key++} className="text-sm bg-gray-100 dark:bg-gray-800 px-1 rounded">{inlineSeg}</code>);
+        }
+        continue;
+      }
+
+      // Plain text — apply bold/italic and line breaks
+      const lines = inlineSeg.split('\n');
+      lines.forEach((line, lineIdx) => {
+        if (lineIdx > 0) nodes.push(<br key={key++} />);
+        if (!line.trim()) return;
+        const html = line
+          .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+          .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
+        nodes.push(<span key={key++} dangerouslySetInnerHTML={{ __html: html }} />);
+      });
+    }
+  }
+
+  return <>{nodes}</>;
+}
 
 interface ChatMessageProps {
   message: Message;
@@ -109,23 +159,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, onSourceClick, origi
               ? 'text-gray-900 dark:text-gray-100'
               : 'text-gray-800 dark:text-gray-200'
           }`}>
-            {message.content.split('\n').map((line, index) => {
-              if (line.trim() === '') return <br key={index} />;
-
-              // Handle markdown-style formatting
-              const formattedLine = line
-                .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
-                .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
-                .replace(/•/g, '•');
-
-              return (
-                <p
-                  key={index}
-                  className="mb-3 last:mb-0"
-                  dangerouslySetInnerHTML={{ __html: formattedLine }}
-                />
-              );
-            })}
+            {renderMessageContent(message.content)}
           </div>
 
           {/* Metadata - Subtle and clean */}

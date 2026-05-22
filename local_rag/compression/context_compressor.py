@@ -46,11 +46,13 @@ class ContextCompressor:
             min_sentence_length: Minimum sentence length to consider
             max_context_length: Maximum context length after compression
         """
+        logger = logging.getLogger(__name__)
         if embedder_model is None:
-            print("Loading embedder for context compression...")
+            logger.info("Loading embedder for context compression...")
             self.embedder = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
         else:
             self.embedder = embedder_model
+        self._logger = logger
             
         self.compression_ratio = compression_ratio
         self.min_sentence_length = min_sentence_length
@@ -72,7 +74,7 @@ class ContextCompressor:
             'numérico', 'numerical', 'equação', 'equation', 'pressão', 'pressure'
         }
         
-        print(f"✅ Context Compressor initialized (target ratio: {compression_ratio})")
+        self._logger.info("Context Compressor initialized (target ratio: %s)", compression_ratio)
     
     def compress_context(self, 
                         contexts: List[Dict[str, Any]], 
@@ -253,53 +255,47 @@ class ContextCompressor:
         # Sort by importance score (descending)
         return sorted(combined_scores, key=lambda x: x[1], reverse=True)
     
-    def _select_sentences(self, sentences: List[str], sentence_scores: List[Tuple[str, float]], query: str) -> Tuple[List[str], List[str]]:
-        """Select most important sentences based on compression ratio"""
+    def _select_sentences(
+        self,
+        sentences: List[str],
+        sentence_scores: List[Tuple[str, float]],
+        query: str,
+        redundancy_threshold: float = 0.8,
+    ) -> Tuple[List[str], List[str]]:
+        """Select most important sentences, caching embeddings to avoid O(n²) re-encoding."""
         if not sentence_scores:
             return [], sentences
-        
-        # Calculate target number of sentences
+
         target_count = max(1, int(len(sentences) * self.compression_ratio))
-        
-        # Always include the most relevant sentence
-        selected = [sentence_scores[0][0]]
-        selected_scores = [sentence_scores[0][1]]
-        
-        # Add more sentences while staying under length limit
+
+        selected: List[str] = [sentence_scores[0][0]]
+        # Pre-compute embedding for the first selected sentence
+        selected_embeddings: List[np.ndarray] = [
+            self.embedder.encode([sentence_scores[0][0]])[0]
+        ]
         current_length = len(selected[0])
-        
+
         for sentence, score in sentence_scores[1:]:
             if len(selected) >= target_count:
                 break
-            
-            # Check if adding this sentence would exceed length limit
             potential_length = current_length + len(sentence)
             if potential_length > self.max_context_length:
                 continue
-            
-            # Avoid redundancy - check semantic similarity with already selected
-            if not self._is_redundant(sentence, selected):
-                selected.append(sentence)
-                selected_scores.append(score)
-                current_length = potential_length
-        
-        # Find removed sentences
+
+            # Check redundancy using cached embeddings (O(n) per candidate)
+            candidate_emb = self.embedder.encode([sentence])[0]
+            stacked = np.vstack(selected_embeddings)
+            sims = cosine_similarity(candidate_emb.reshape(1, -1), stacked)[0]
+            if np.max(sims) > redundancy_threshold:
+                continue
+
+            selected.append(sentence)
+            selected_embeddings.append(candidate_emb)
+            current_length = potential_length
+
         selected_set = set(selected)
         removed = [s for s in sentences if s not in selected_set]
-        
         return selected, removed
-    
-    def _is_redundant(self, candidate: str, selected: List[str], threshold: float = 0.8) -> bool:
-        """Check if candidate sentence is too similar to already selected ones"""
-        if not selected:
-            return False
-        
-        candidate_embedding = self.embedder.encode([candidate])
-        selected_embeddings = self.embedder.encode(selected)
-        
-        similarities = cosine_similarity(candidate_embedding, selected_embeddings)[0]
-        
-        return np.max(similarities) > threshold
     
     def _reorder_sentences(self, selected_sentences: List[str], original_text: str) -> str:
         """Reorder selected sentences to maintain logical flow"""

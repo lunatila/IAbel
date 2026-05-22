@@ -1,13 +1,44 @@
 """
 Enhanced PDF Metadata Extractor for RAG v3
-Extracts author, year, and title information from PDFs for academic-style citations
+Uses PyMuPDF Info dict as primary source, text heuristics as fallback.
 """
 
 import re
 import os
-from typing import Dict, Optional, List, Tuple
-from dataclasses import dataclass
-import pdfplumber
+import logging
+from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+try:
+    import fitz  # PyMuPDF
+    _FITZ_AVAILABLE = True
+except ImportError:
+    _FITZ_AVAILABLE = False
+    logger.warning("PyMuPDF not installed — falling back to pdfplumber for metadata extraction.")
+
+# Valid year range for publications
+_YEAR_MIN = 1900
+_YEAR_MAX = 2026
+
+_YEAR_RE = re.compile(r'\b(19\d{2}|20\d{2})\b')
+_DOI_RE = re.compile(r'10\.\d{4,}/\S+')
+_CREATION_DATE_RE = re.compile(r'D:(\d{4})')
+
+# Words that look like names but are not
+_NON_NAME_WORDS = frozenset({
+    'abstract', 'introduction', 'conclusion', 'results', 'discussion',
+    'references', 'acknowledgements', 'university', 'institute', 'department',
+    'school', 'faculty', 'college', 'laboratory', 'center', 'centre',
+    'journal', 'proceedings', 'conference', 'symposium', 'workshop',
+    'volume', 'number', 'edition', 'chapter', 'section', 'appendix',
+    'figure', 'table', 'equation', 'theorem', 'proof', 'example',
+    'january', 'february', 'march', 'april', 'june', 'july', 'august',
+    'september', 'october', 'november', 'december',
+    'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+    'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+})
 
 
 @dataclass
@@ -17,11 +48,12 @@ class DocumentMetadata:
     year: Optional[int]
     title: str
     filename: str
+    doi: Optional[str] = None
+    confidence: float = 0.0  # fraction of fields sourced from PDF Info dict
 
     def format_citation(self) -> str:
         """Format as (Author, Year) or (Author et al., Year)"""
         if not self.authors:
-            # Fallback to filename without extension
             author = os.path.splitext(self.filename)[0]
             year_str = str(self.year) if self.year else "n.d."
             return f"({author}, {year_str})"
@@ -31,312 +63,332 @@ class DocumentMetadata:
         elif len(self.authors) == 2:
             author_str = f"{self.authors[0]} and {self.authors[1]}"
         else:
-            # More than 2 authors: use et al.
             author_str = f"{self.authors[0]} et al."
 
         year_str = str(self.year) if self.year else "n.d."
         return f"({author_str}, {year_str})"
 
     def format_inline_citation(self) -> str:
-        """Format for inline use in text"""
         return self.format_citation()
 
 
+def _is_valid_year(value: int) -> bool:
+    return _YEAR_MIN <= value <= _YEAR_MAX
+
+
+def _is_valid_field(value: Optional[str]) -> bool:
+    """Return True if a metadata string field contains genuinely useful content."""
+    if not value or not value.strip():
+        return False
+    v = value.strip()
+    if len(v) < 3:
+        return False
+    if v.lower() in ('unknown', 'none', 'n/a', 'untitled', 'author'):
+        return False
+    # Reject UUID-like strings
+    if re.match(r'^[0-9a-f\-]{32,}$', v, re.IGNORECASE):
+        return False
+    return True
+
+
+def _looks_like_name_token(token: str) -> bool:
+    """Return True if token could be a component of a human name."""
+    if len(token) < 3:
+        return False
+    if not token[0].isupper():
+        return False
+    if not re.match(r"^[A-Za-záàâãäéèêëíìîïóòôõöúùûüçñA-Z'\-]+$", token):
+        return False
+    if token.lower() in _NON_NAME_WORDS:
+        return False
+    return True
+
+
+def _validate_author(name: str) -> bool:
+    """Return True if name looks like a real person name."""
+    name = name.strip()
+    if len(name) < 5:
+        return False
+    if any(c.isdigit() for c in name):
+        return False
+    tokens = name.replace(',', ' ').split()
+    if len(tokens) < 2:
+        return False
+    return any(_looks_like_name_token(t) for t in tokens if len(t) >= 3)
+
+
+def _parse_year_from_date_string(date_str: str) -> Optional[int]:
+    """Extract year from PDF CreationDate format 'D:YYYYMMDD...'."""
+    m = _CREATION_DATE_RE.search(date_str)
+    if m:
+        y = int(m.group(1))
+        return y if _is_valid_year(y) else None
+    return None
+
+
+def _extract_years_from_text(text: str) -> List[int]:
+    return [int(m) for m in _YEAR_RE.findall(text) if _is_valid_year(int(m))]
+
+
+def _extract_doi_from_text(text: str) -> Optional[str]:
+    m = _DOI_RE.search(text[:3000])
+    if m:
+        return m.group(0).rstrip('.,;)')
+    return None
+
+
+def _split_author_string(raw: str) -> List[str]:
+    """Split a raw author metadata field into individual name strings."""
+    parts = re.split(r'\s*;\s*|\s+and\s+|\s*&\s*', raw, flags=re.IGNORECASE)
+    result = []
+    for part in parts:
+        part = part.strip()
+        part = re.sub(r'\b(Dr|Prof|Mr|Mrs|Ms)\.?\s+', '', part, flags=re.IGNORECASE).strip()
+        if part:
+            result.append(part)
+    return result
+
+
 class MetadataExtractorV3:
-    """Enhanced metadata extractor for RAG v3"""
-
-    def __init__(self):
-        # Patterns for extracting author names
-        self.author_patterns = [
-            # "by John Smith" or "Author: John Smith"
-            r'(?:by|author[s]?:?\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)',
-            # "Smith, J." or "Smith, J. D."
-            r'([A-Z][a-z]+,\s+[A-Z]\.(?:\s+[A-Z]\.)*)',
-            # "John Smith" at start of line (first few lines)
-            r'^([A-Z][a-z]+\s+[A-Z][a-z]+)',
-        ]
-
-        # Patterns for extracting years
-        self.year_patterns = [
-            r'\b(20\d{2})\b',  # 2000-2099
-            r'\b(19\d{2})\b',  # 1900-1999
-            r'(?:year|published|copyright)[\s:]*(\d{4})',
-        ]
-
-        # Common Portuguese/English first names to validate authors
-        self.common_names = {
-            'joão', 'maria', 'josé', 'ana', 'paulo', 'carlos', 'pedro', 'lucas',
-            'julia', 'mariana', 'fernando', 'ricardo', 'diego', 'gabriel',
-            'john', 'mary', 'james', 'robert', 'michael', 'william', 'david',
-            'richard', 'joseph', 'thomas', 'charles', 'daniel', 'matthew',
-            'emilio', 'dimary', 'malu', 'malú', 'onur'
-        }
+    """
+    Extracts author, year, title, and DOI from PDF files.
+    Primary source: PyMuPDF Info dict (structured PDF metadata).
+    Fallback: text heuristics on the first 3 pages.
+    """
 
     def extract_metadata(self, pdf_path: str) -> DocumentMetadata:
-        """
-        Extract metadata from PDF file
-
-        Args:
-            pdf_path: Path to PDF file
-
-        Returns:
-            DocumentMetadata object
-        """
         filename = os.path.basename(pdf_path)
+        authors: List[str] = []
+        year: Optional[int] = None
+        title: Optional[str] = None
+        doi: Optional[str] = None
+        structured_fields = 0
+        total_fields = 3  # author, year, title
 
-        # Try multiple extraction methods
-        authors = []
-        year = None
-        title = None
+        if _FITZ_AVAILABLE:
+            authors, year, title, doi, structured_fields = self._extract_with_fitz(pdf_path)
+        else:
+            authors, year, title = self._extract_with_pdfplumber(pdf_path, [], None, None)
 
-        # 1. Extract from filename first (often most reliable)
-        filename_authors, filename_year = self._extract_from_filename(filename)
-        if filename_authors:
-            authors = filename_authors
-        if filename_year:
-            year = filename_year
+        # Fill any missing fields with text heuristics
+        if not authors or not year or not title or not doi:
+            authors, year, title, doi = self._extract_with_heuristics(
+                pdf_path, authors, year, title, doi
+            )
 
-        # 2. Try PDF metadata
-        try:
-            with pdfplumber.open(pdf_path) as pdf:
-                if hasattr(pdf, 'metadata') and pdf.metadata:
-                    metadata = pdf.metadata
+        # Filename fallback
+        if not authors or not year:
+            fn_authors, fn_year = self._extract_from_filename(filename)
+            if not authors and fn_authors:
+                authors = fn_authors
+            if not year and fn_year:
+                year = fn_year
 
-                    # Extract from metadata
-                    if not authors and metadata.get('Author'):
-                        metadata_authors = self._parse_author_string(metadata.get('Author', ''))
-                        if metadata_authors:
-                            authors = metadata_authors
-
-                    if not year and metadata.get('CreationDate'):
-                        # CreationDate format: D:20240726...
-                        creation_date = metadata.get('CreationDate', '')
-                        year_match = re.search(r'D:(\d{4})', creation_date)
-                        if year_match:
-                            year = int(year_match.group(1))
-
-                    if not title and metadata.get('Title'):
-                        title = metadata.get('Title')
-
-                # 3. Extract from first page
-                if (not authors or not year or not title) and pdf.pages:
-                    first_page_text = pdf.pages[0].extract_text()
-                    if first_page_text:
-                        if not authors:
-                            page_authors = self._extract_authors_from_text(first_page_text)
-                            if page_authors:
-                                authors = page_authors
-
-                        if not year:
-                            page_year = self._extract_year_from_text(first_page_text)
-                            if page_year:
-                                year = page_year
-
-                        if not title:
-                            page_title = self._extract_title_from_text(first_page_text)
-                            if page_title:
-                                title = page_title
-
-        except Exception as e:
-            print(f"   ⚠️ Error extracting PDF metadata: {e}")
-
-        # Fallbacks
         if not authors:
-            # Use filename as author
             authors = [self._clean_filename_as_author(filename)]
-
         if not title:
-            # Use filename as title
             title = self._clean_filename_as_title(filename)
-
-        # Ensure year is valid
-        if year and (year < 1900 or year > 2100):
+        if year and not _is_valid_year(year):
             year = None
+
+        confidence = structured_fields / total_fields if _FITZ_AVAILABLE else 0.0
 
         return DocumentMetadata(
             authors=authors,
             year=year,
             title=title,
-            filename=filename
+            filename=filename,
+            doi=doi,
+            confidence=confidence,
         )
 
-    def _extract_from_filename(self, filename: str) -> Tuple[Optional[List[str]], Optional[int]]:
-        """Extract author and year from filename"""
-        authors = []
-        year = None
+    def _extract_with_fitz(
+        self, pdf_path: str
+    ) -> Tuple[List[str], Optional[int], Optional[str], Optional[str], int]:
+        """Read PDF Info dict with PyMuPDF."""
+        authors: List[str] = []
+        year: Optional[int] = None
+        title: Optional[str] = None
+        doi: Optional[str] = None
+        structured_count = 0
 
-        # Remove extension
-        name_without_ext = os.path.splitext(filename)[0]
+        try:
+            doc = fitz.open(pdf_path)
+            meta = doc.metadata
 
-        # Common patterns:
-        # "Dimary 2024.pdf" -> Dimary, 2024
-        # "Emilio Coutinho - PhD Dissertation_compressed.pdf" -> Emilio Coutinho
-        # "Qualificação Dimary.pdf" -> Dimary
+            raw_title = meta.get('title', '')
+            if _is_valid_field(raw_title):
+                title = raw_title.strip()
+                structured_count += 1
 
-        # Extract year
-        year_match = re.search(r'\b(20\d{2})\b', name_without_ext)
-        if year_match:
-            year = int(year_match.group(1))
+            raw_author = meta.get('author', '')
+            if _is_valid_field(raw_author):
+                parsed = _split_author_string(raw_author)
+                valid = [a for a in parsed if _validate_author(a)]
+                if valid:
+                    authors = valid[:5]
+                    structured_count += 1
 
-        # Extract author names (before " - " or before year or before keywords)
-        # Remove common keywords
-        cleaned = re.sub(r'(?i)(qualificação|dissertation|thesis|manual|compressed|_compressed)', '', name_without_ext)
-        cleaned = re.sub(r'[-_]+', ' ', cleaned)
+            for date_key in ('creationDate', 'modDate'):
+                raw_date = meta.get(date_key, '')
+                if raw_date:
+                    y = _parse_year_from_date_string(raw_date)
+                    if y:
+                        year = y
+                        structured_count += 1
+                        break
 
-        # Look for capitalized words (likely names)
-        words = cleaned.split()
-        potential_authors = []
+            if doc.page_count > 0:
+                first_page_text = doc[0].get_text()
+                doi = _extract_doi_from_text(first_page_text)
 
-        for i, word in enumerate(words):
-            # Stop at year
-            if word.isdigit() and len(word) == 4:
-                break
+            doc.close()
+        except Exception as e:
+            logger.warning("PyMuPDF failed to read '%s': %s", pdf_path, e)
 
-            # Check if word starts with capital and is likely a name
-            if word and word[0].isupper() and len(word) > 1:
-                # Check if it's a known name or follows name pattern
-                if (word.lower() in self.common_names or
-                    len(word) >= 3 and word.isalpha()):
-                    potential_authors.append(word)
+        return authors, year, title, doi, structured_count
 
-        if potential_authors:
-            # Join consecutive names (e.g., ["Emilio", "Coutinho"] -> "Emilio Coutinho")
-            authors = [' '.join(potential_authors)]
+    def _extract_with_pdfplumber(
+        self,
+        pdf_path: str,
+        existing_authors: List[str],
+        existing_year: Optional[int],
+        existing_title: Optional[str],
+    ) -> Tuple[List[str], Optional[int], Optional[str]]:
+        """Fallback when PyMuPDF is unavailable."""
+        authors = list(existing_authors)
+        year = existing_year
+        title = existing_title
 
-        return (authors if authors else None, year)
+        try:
+            import pdfplumber
+            with pdfplumber.open(pdf_path) as pdf:
+                meta = pdf.metadata or {}
 
-    def _parse_author_string(self, author_str: str) -> List[str]:
-        """Parse author string from PDF metadata"""
-        if not author_str or not author_str.strip():
-            return []
+                if not authors and _is_valid_field(meta.get('Author')):
+                    parsed = _split_author_string(meta['Author'])
+                    valid = [a for a in parsed if _validate_author(a)]
+                    if valid:
+                        authors = valid[:5]
 
-        # Common separators: ",", "and", "&", ";"
-        authors = re.split(r'[,;&]|\band\b', author_str)
-        authors = [a.strip() for a in authors if a.strip()]
+                if not year and _is_valid_field(meta.get('CreationDate')):
+                    y = _parse_year_from_date_string(meta['CreationDate'])
+                    if y:
+                        year = y
 
-        # Clean each author name
-        cleaned_authors = []
-        for author in authors:
-            # Remove titles (Dr., Prof., etc.)
-            author = re.sub(r'\b(Dr|Prof|Mr|Mrs|Ms)\.?\s+', '', author, flags=re.IGNORECASE)
-            author = author.strip()
-            if author:
-                cleaned_authors.append(author)
+                if not title and _is_valid_field(meta.get('Title')):
+                    title = meta['Title'].strip()
+        except Exception as e:
+            logger.warning("pdfplumber failed to read '%s': %s", pdf_path, e)
 
-        return cleaned_authors[:3]  # Maximum 3 authors
+        return authors, year, title
 
-    def _extract_authors_from_text(self, text: str) -> Optional[List[str]]:
-        """Extract author names from first page text"""
-        lines = text.split('\n')[:15]  # Check first 15 lines
+    def _extract_with_heuristics(
+        self,
+        pdf_path: str,
+        existing_authors: List[str],
+        existing_year: Optional[int],
+        existing_title: Optional[str],
+        existing_doi: Optional[str],
+    ) -> Tuple[List[str], Optional[int], Optional[str], Optional[str]]:
+        """Text-based heuristics on the first 3 pages."""
+        authors = list(existing_authors)
+        year = existing_year
+        title = existing_title
+        doi = existing_doi
 
-        authors = []
+        try:
+            if _FITZ_AVAILABLE:
+                doc = fitz.open(pdf_path)
+                pages_text = [doc[i].get_text() for i in range(min(3, doc.page_count))]
+                doc.close()
+            else:
+                import pdfplumber
+                with pdfplumber.open(pdf_path) as pdf:
+                    pages_text = [p.extract_text() or '' for p in pdf.pages[:3]]
+        except Exception as e:
+            logger.warning("Heuristic text extraction failed for '%s': %s", pdf_path, e)
+            return authors, year, title, doi
+
+        combined = '\n'.join(pages_text)
+
+        if not doi:
+            doi = _extract_doi_from_text(combined)
+
+        if not year:
+            years = _extract_years_from_text(combined[:1000])
+            year = max(years) if years else None
+
+        if not title and pages_text:
+            title = self._extract_title_from_text(pages_text[0])
+
+        if not authors and pages_text:
+            authors = self._extract_authors_from_text(pages_text[0])
+
+        return authors, year, title, doi
+
+    def _extract_authors_from_text(self, text: str) -> List[str]:
+        """Heuristic author extraction from page text."""
+        lines = text.split('\n')[:20]
+        found: List[str] = []
+        # Match lines that start with a capital-letter name pattern
+        name_re = re.compile(
+            r'^([A-ZÁÀÂÃÉÈÊÍÌÎÓÒÔÕÚÙÛÇ][a-záàâãéèêíìîóòôõúùûç]+'
+            r'(?:[\s\-][A-ZÁÀÂÃÉÈÊÍÌÎÓÒÔÕÚÙÛÇ][a-záàâãéèêíìîóòôõúùûç]+)+)'
+        )
         for line in lines:
             line = line.strip()
-            if not line or len(line) > 100:  # Skip empty or too long
+            if not line or len(line) > 120:
                 continue
-
-            # Look for author patterns
-            for pattern in self.author_patterns:
-                matches = re.findall(pattern, line, re.MULTILINE)
-                for match in matches:
-                    author = match.strip()
-                    if self._is_likely_author(author):
-                        authors.append(author)
-
-            # Also check for simple capitalized names at line start
-            if line and line[0].isupper():
-                words = line.split()
-                if len(words) >= 2 and len(words) <= 4:
-                    # Check if all words are capitalized
-                    if all(w[0].isupper() for w in words if w):
-                        potential_author = ' '.join(words)
-                        if self._is_likely_author(potential_author):
-                            authors.append(potential_author)
-
-        return authors[:3] if authors else None  # Max 3 authors
-
-    def _is_likely_author(self, name: str) -> bool:
-        """Check if string is likely an author name"""
-        if not name or len(name) < 3:
-            return False
-
-        # Should contain at least 2 words
-        words = name.split()
-        if len(words) < 1:
-            return False
-
-        # Check for common patterns
-        # 1. "Firstname Lastname"
-        # 2. "Lastname, F."
-        # 3. Known names from our list
-
-        first_word = words[0].lower().rstrip(',')
-        if first_word in self.common_names:
-            return True
-
-        # Check if it looks like a name (starts with capital, only letters/spaces/commas)
-        if re.match(r'^[A-Z][a-zA-Z\s,.]+$', name):
-            return True
-
-        return False
-
-    def _extract_year_from_text(self, text: str) -> Optional[int]:
-        """Extract publication year from text"""
-        # Look for years in first 500 characters
-        text_start = text[:500]
-
-        for pattern in self.year_patterns:
-            matches = re.findall(pattern, text_start)
-            for match in matches:
-                try:
-                    year = int(match)
-                    if 1900 <= year <= 2100:
-                        return year
-                except ValueError:
-                    continue
-
-        return None
+            m = name_re.match(line)
+            if m:
+                candidate = m.group(1)
+                if _validate_author(candidate) and candidate not in found:
+                    found.append(candidate)
+            if len(found) >= 5:
+                break
+        return found
 
     def _extract_title_from_text(self, text: str) -> Optional[str]:
-        """Extract title from first page"""
-        lines = text.split('\n')
-
-        # Look for title in first 10 lines
-        for line in lines[:10]:
+        """Heuristic title extraction from first page."""
+        for line in text.split('\n')[:15]:
             line = line.strip()
-
-            # Skip short lines, page numbers, headers
-            if len(line) < 10 or len(line) > 200:
-                continue
-
-            # Skip lines that look like metadata
-            if re.match(r'^\d+$', line) or line.lower().startswith(('page', 'abstract', 'keywords')):
-                continue
-
-            # Title is usually in title case or all caps, and substantial
-            if (len(line) > 15 and
-                (line.isupper() or line.istitle() or any(c.isupper() for c in line[:20]))):
-                # Clean and return
-                title = re.sub(r'\s+', ' ', line).strip()
-                return title
-
+            if 20 <= len(line) <= 200:
+                if re.match(r'^\d+$', line):
+                    continue
+                if line.lower().startswith(('abstract', 'resumo', 'keywords', 'page ')):
+                    continue
+                return re.sub(r'\s+', ' ', line)
         return None
 
+    def _extract_from_filename(
+        self, filename: str
+    ) -> Tuple[Optional[List[str]], Optional[int]]:
+        """Extract author and year hints from the filename."""
+        base = os.path.splitext(filename)[0]
+        year_m = _YEAR_RE.search(base)
+        year = int(year_m.group(1)) if year_m and _is_valid_year(int(year_m.group(1))) else None
+
+        cleaned = re.sub(
+            r'(?i)(qualifica[cç][aã]o|dissertation|thesis|manual|compressed)', '', base
+        )
+        cleaned = re.sub(r'[-_]+', ' ', cleaned).strip()
+
+        name_tokens = [
+            t for t in cleaned.split()
+            if t and not t.isdigit() and len(t) > 2 and _looks_like_name_token(t)
+        ]
+        authors = [' '.join(name_tokens)] if len(name_tokens) >= 2 else None
+        return authors, year
+
     def _clean_filename_as_author(self, filename: str) -> str:
-        """Use cleaned filename as author fallback"""
         name = os.path.splitext(filename)[0]
-        # Remove common suffixes
-        name = re.sub(r'(?i)(_compressed|compressed|\.pdf)', '', name)
-        # Remove underscores and hyphens
+        name = re.sub(r'(?i)(_compressed|compressed)', '', name)
         name = re.sub(r'[-_]+', ' ', name)
-        # Take first few words
-        words = name.split()[:3]
-        return ' '.join(words)
+        return ' '.join(name.split()[:3])
 
     def _clean_filename_as_title(self, filename: str) -> str:
-        """Use cleaned filename as title fallback"""
         title = os.path.splitext(filename)[0]
         title = re.sub(r'(?i)(_compressed|compressed)', '', title)
         title = re.sub(r'[-_]+', ' ', title)
-        title = re.sub(r'\s+', ' ', title).strip()
-        return title
+        return re.sub(r'\s+', ' ', title).strip()

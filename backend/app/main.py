@@ -27,22 +27,22 @@ sys.path.insert(0, str(app_dir))
 from services.rag_service import get_rag_service
 from utils.logging_config import setup_logging, get_error_tracker
 
-# Import hybrid RAG+LoRA system
+import logging
+
+# Setup logging before any code that uses logger
+logger = setup_logging(
+    log_level=os.getenv("LOG_LEVEL", "INFO"),
+    log_file=os.getenv("LOG_FILE", "logs/iabel_api.log")
+)
+
+# Import hybrid RAG+LoRA system (after logger is available)
 try:
     sys.path.append(str(app_dir.parent / "fine_tuning"))
     from hybrid_rag_lora import HybridRAGService
     HYBRID_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Hybrid RAG+LoRA not available: {e}")
+    logger.warning("Hybrid RAG+LoRA not available: %s", e)
     HYBRID_AVAILABLE = False
-
-import logging
-
-# Setup logging
-logger = setup_logging(
-    log_level=os.getenv("LOG_LEVEL", "INFO"),
-    log_file=os.getenv("LOG_FILE", "logs/iabel_api.log")
-)
 
 app = FastAPI(
     title="IAbel API", 
@@ -332,8 +332,9 @@ async def start_lora_training():
         # This would typically be run as a background task
         from fine_tuning.train_lora import train_lora_model
         
-        pdf_directory = "/home/lacucaratila/Projetos/IAbel/backend/data/pdfs"
-        output_directory = "/home/lacucaratila/Projetos/IAbel/backend/fine_tuning/outputs"
+        _backend_root = Path(__file__).parent.parent
+        pdf_directory = str(_backend_root / "data" / "pdfs")
+        output_directory = str(_backend_root / "fine_tuning" / "outputs")
         
         # Note: In production, this should be a background task
         success = train_lora_model(pdf_directory, output_directory)
@@ -470,19 +471,15 @@ async def chat_stream(enhanced_message: EnhancedChatMessage):
             try:
                 # Route based on mode
                 if enhanced_message.mode == 'rag_v3':
-                    # RAG v3 mode - English with academic citations
-                    logger.info("Using RAG v3 mode")
-
-                    # v3 doesn't have streaming yet, so return complete response
-                    result = await rag_service.ask_question_v3(
+                    # RAG v3 mode - English with academic citations (real streaming)
+                    logger.info("Using RAG v3 mode (streaming)")
+                    async for chunk in rag_service.ask_question_v3_stream(
                         question=enhanced_message.message,
                         conversation_id=enhanced_message.conversation_id,
-                        top_k=enhanced_message.top_k or 6,
+                        top_k=enhanced_message.top_k or 8,
                         include_sources=enhanced_message.include_sources
-                    )
-
-                    # Yield complete response
-                    yield f"data: {json.dumps({'type': 'complete', **result})}\n\n"
+                    ):
+                        yield f"data: {json.dumps(chunk)}\n\n"
                 else:
                     # Use the direct RAG service for streaming (v1/v2)
                     async for chunk in rag_service.ask_question_stream(

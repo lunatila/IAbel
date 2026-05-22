@@ -245,8 +245,10 @@ class EnhancedRAGSystem(LocalRAGSystem):
         
         # Generate embeddings in batches
         print("🔄 Generating embeddings...")
-        texts = [chunk.content if hasattr(chunk, 'content') else chunk.content 
-                for chunk in all_chunks]
+        texts = [
+            getattr(chunk, 'content', None) or getattr(chunk, 'page_content', '')
+            for chunk in all_chunks
+        ]
         embeddings = self.embedder.embed_batch(texts, batch_size=32)
         
         # Prepare data for vector store
@@ -268,10 +270,8 @@ class EnhancedRAGSystem(LocalRAGSystem):
             return cleaned
 
         documents = texts
-        metadatas = [clean_metadata(chunk.metadata if hasattr(chunk, 'metadata') else chunk.metadata) 
-                    for chunk in all_chunks]
-        ids = [chunk.chunk_id if hasattr(chunk, 'chunk_id') else chunk.chunk_id 
-               for chunk in all_chunks]
+        metadatas = [clean_metadata(getattr(chunk, 'metadata', {})) for chunk in all_chunks]
+        ids = [getattr(chunk, 'chunk_id', str(i)) for i, chunk in enumerate(all_chunks)]
         
         # Add to vector store
         print("💾 Adding to enhanced vector store...")
@@ -394,23 +394,6 @@ class EnhancedRAGSystem(LocalRAGSystem):
             # Convert LangChain chunks to format expected by vector store
             texts = []
             metadatas = []
-            
-            def clean_metadata(metadata):
-                """Clean metadata to only include primitive types for ChromaDB"""
-                cleaned = {}
-                for key, value in metadata.items():
-                    if isinstance(value, (str, int, float, bool)) or value is None:
-                        cleaned[key] = value
-                    elif isinstance(value, dict):
-                        # Skip nested dicts or convert to string if needed
-                        cleaned[f"{key}_str"] = str(value)[:100]  # Truncate if too long
-                    elif isinstance(value, (list, tuple)):
-                        # Convert list to string representation
-                        cleaned[f"{key}_str"] = str(value)[:100]
-                    else:
-                        # Convert other types to string
-                        cleaned[f"{key}_str"] = str(value)[:100]
-                return cleaned
             
             for chunk in all_chunks:
                 texts.append(chunk.content)
@@ -575,7 +558,7 @@ class EnhancedRAGSystem(LocalRAGSystem):
             
             # Apply context compression if enabled
             compressed_context = None
-            if False and self.context_compressor and use_all_enhancements:
+            if self.context_compressor and use_all_enhancements:
                 print("   🗜️ Compressing context...")
                 # Transform search results to expected format for compression
                 context_chunks = []
@@ -888,7 +871,7 @@ FORMATO DE RESPOSTA:
             ])
             compression_stats = None
             
-            if False and self.context_compressor and use_all_enhancements:
+            if self.context_compressor and use_all_enhancements:
                 yield {
                     'type': 'compression',
                     'message': 'Comprimindo contexto...',

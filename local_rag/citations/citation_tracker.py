@@ -196,41 +196,27 @@ class CitationTracker:
         return sources
     
     def _segment_response(self, response_text: str) -> List[Dict[str, Any]]:
-        """Split response into meaningful segments for citation"""
-        # Split by sentences but keep track of positions
+        """Split response into sentences for citation matching."""
         segments = []
-        
-        # Handle multiple sentence endings and clean split
-        sentence_pattern = r'([.!?]+)\s+'
-        parts = re.split(sentence_pattern, response_text)
-        
+        # Split on sentence-ending punctuation followed by whitespace,
+        # but not on abbreviations like Dr., et al., Fig., etc.
+        # Strategy: split on ". " or "? " or "! " only when preceded by a
+        # lowercase letter or closing bracket (not an uppercase abbreviation).
+        sentence_end_re = re.compile(r'(?<=[a-z0-9\]\)])[.!?]+\s+')
+        parts = sentence_end_re.split(response_text)
+
         current_pos = 0
-        current_sentence = ""
-        
-        for i, part in enumerate(parts):
-            if i % 2 == 0:  # Text part
-                current_sentence += part
-            else:  # Punctuation part
-                current_sentence += part
-                
-                # Create segment
-                if current_sentence.strip():
-                    segments.append({
-                        'text': current_sentence.strip(),
-                        'start': current_pos,
-                        'end': current_pos + len(current_sentence.strip())
-                    })
-                    current_pos += len(current_sentence)
-                    current_sentence = ""
-        
-        # Handle any remaining text
-        if current_sentence.strip():
-            segments.append({
-                'text': current_sentence.strip(),
-                'start': current_pos,
-                'end': current_pos + len(current_sentence.strip())
-            })
-        
+        for part in parts:
+            part = part.strip()
+            if part:
+                segments.append({
+                    'text': part,
+                    'start': current_pos,
+                    'end': current_pos + len(part)
+                })
+            # Advance past the raw part length (+1 for the separator)
+            current_pos += len(part) + 1
+
         return segments
     
     def _find_citations_for_segment(self, segment: Dict[str, Any], sources: List[CitationSource]) -> List[CitationSource]:
@@ -401,6 +387,22 @@ class CitationTracker:
         
         return "".join(response_parts)
     
+    def _format_footnote_citations(self, citation_map: CitationMap) -> str:
+        """Format citations as numbered footnotes."""
+        footnote_counter = 1
+        footnotes: List[str] = []
+        result = citation_map.response_text
+
+        for segment in citation_map.cited_segments:
+            for source in segment.sources[:2]:
+                note = f"[{footnote_counter}] {source.document_name}, p. {source.page_number}"
+                footnotes.append(note)
+                footnote_counter += 1
+
+        if footnotes:
+            result += "\n\n---\n" + "\n".join(footnotes)
+        return result
+
     def _format_simple_citations(self, citation_map: CitationMap) -> str:
         """Simple citation format with source list"""
         unique_sources = {}

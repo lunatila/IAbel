@@ -5,7 +5,7 @@ Uses Google Gemini API and enhanced metadata extraction
 
 import os
 import sys
-from typing import List, Dict, Any, Optional
+from typing import AsyncIterator, List, Dict, Any, Optional
 from pathlib import Path
 
 # Import from existing modules
@@ -200,20 +200,11 @@ class RAGv3System:
 
     def ask_question(self,
                     question: str,
-                    top_k: int = 6,
+                    top_k: int = 8,
                     include_sources: bool = True) -> Dict[str, Any]:
         """
-        Answer question with English response and (Author, Year) citations
-
-        Args:
-            question: User question
-            top_k: Number of context documents
-            include_sources: Whether to include sources
-
-        Returns:
-            Answer with metadata
+        Answer question with English response and (Author, Year) citations.
         """
-        # Search for relevant documents
         search_results = self.search_documents(question, top_k=top_k)
 
         if not search_results:
@@ -224,85 +215,121 @@ class RAGv3System:
                 'sources': []
             }
 
-        # Build context with citation mapping
-        context_docs = []
-        citation_map = {}
+        _, system_prompt = self._build_context_and_prompt(search_results)
 
-        for i, result in enumerate(search_results):
-            content = result['content']
-            metadata = result['metadata']
-
-            # Get citation
-            citation = metadata.get('citation', f"(Unknown, n.d.)")
-            filename = metadata.get('filename', metadata.get('source', 'Unknown'))
-
-            # Map document to its citation
-            doc_key = f"doc_{i+1}"
-            citation_map[doc_key] = citation
-
-            # Add to context with marker
-            context_docs.append(f"[{doc_key}] {content}")
-
-        context_text = "\n\n".join(context_docs)
-
-        # Create citation instructions
-        citation_instructions = "When referencing information from the documents, use inline citations in the format (Author, Year) or (Author et al., Year). "
-        citation_instructions += f"Citation mapping: {'; '.join([f'{k}={v}' for k, v in citation_map.items()])}"
-
-        # Build system prompt (English)
-        system_prompt = f"""You are an expert assistant in Reservoir Engineering.
-
-REFERENCE DOCUMENTS:
-{context_text}
-
-{citation_instructions}
-
-CRITICAL RESPONSE INSTRUCTIONS:
-- Respond in English (even if documents are in Portuguese)
-- Be technical and precise
-- IMPORTANT: Use ONLY information that is explicitly stated in the reference documents above
-- DO NOT make assumptions, infer meanings, or provide definitions not present in the documents
-- Use inline citations in (Author, Year) format when referencing specific information
-- Example: "The INSIM-FT method (Dimary, 2024) uses streamline simulation..."
-- If information is not in the documents, clearly state: "This information is not available in the provided documents"
-- When providing definitions or acronym meanings, quote the EXACT definition from the documents
-- Use appropriate reservoir engineering terminology as found in the documents
-- Provide clear and detailed explanations based strictly on document content"""
-
-        # Generate response
         answer = self.llm_client.generate_response(
             prompt=question,
             system_prompt=system_prompt,
             max_tokens=2048,
-            temperature=0.7
+            temperature=0.3
         )
 
-        # Replace document markers with actual citations
-        for doc_key, citation in citation_map.items():
-            # Replace [doc_1] with actual citation
-            answer = answer.replace(f"[{doc_key}]", citation)
-
-        # Calculate confidence
         confidences = [r.get('similarity', 0) for r in search_results]
         avg_confidence = sum(confidences[:3]) / min(3, len(confidences)) if confidences else 0
 
-        # Format sources
-        sources = []
-        if include_sources:
-            for result in search_results:
-                metadata = result['metadata']
-                sources.append({
-                    'content': result['content'][:300],
-                    'source': metadata.get('document_title', metadata.get('source', 'Unknown')),
-                    'page': metadata.get('page', 'N/A'),
-                    'similarity': result.get('similarity', 0),
-                    'author': metadata.get('author', 'Unknown'),
-                    'year': metadata.get('year', 'N/A'),
-                    'citation': metadata.get('citation', '(Unknown, n.d.)')
-                })
+        sources = self._build_sources(search_results) if include_sources else []
 
         return {
             'answer': answer,
+            'confidence': avg_confidence,
+            'total_sources': len(search_results),
+            'sources': sources,
+            'enhanced': True,
+            'generation_mode': 'rag_v3'
+        }
+
+    def _build_context_and_prompt(self, search_results: List[Dict[str, Any]]) -> tuple[str, str]:
+        """Return (context_text, system_prompt) from search results."""
+        context_parts = []
+        for result in search_results:
+            citation = result['metadata'].get('citation', '(Unknown, n.d.)')
+            context_parts.append(f"{citation}:\n{result['content']}")
+        context_text = "\n\n---\n\n".join(context_parts)
+
+        system_prompt = f"""You are an expert assistant in Reservoir Engineering and Petroleum Engineering.
+
+REFERENCE DOCUMENTS:
+{context_text}
+
+REASONING PROCESS:
+Before writing your answer, reason through the question step by step:
+1. Identify what the question is really asking (core concept, comparison, limitation, mechanism, etc.)
+2. Scan the reference documents for directly relevant passages
+3. Identify any gaps or partial coverage
+4. Synthesize across documents if multiple sources address the same point
+5. Only then compose the final answer
+
+INSTRUCTIONS:
+- Answer in English with technical precision
+- Synthesize and summarize information from the reference documents to answer the question fully
+- Use inline citations in (Author, Year) format when referencing specific claims, e.g. (Silva et al., 2022)
+- You may draw technical inferences from the provided content where they are clearly supported
+- If the documents only partially cover the question, provide what is available and note any gaps
+- Do not fabricate facts — ground every claim in the retrieved content above
+- Use appropriate reservoir engineering terminology"""
+        return context_text, system_prompt
+
+    def _build_sources(self, search_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        sources = []
+        for result in search_results:
+            metadata = result['metadata']
+            sources.append({
+                'content': result['content'][:300],
+                'source': metadata.get('document_title', metadata.get('source', 'Unknown')),
+                'page': metadata.get('page', 'N/A'),
+                'similarity': result.get('similarity', 0),
+                'author': metadata.get('author', 'Unknown'),
+                'year': metadata.get('year', 'N/A'),
+                'citation': metadata.get('citation', '(Unknown, n.d.)')
+            })
+        return sources
+
+    async def ask_question_stream(self,
+                                  question: str,
+                                  top_k: int = 8,
+                                  include_sources: bool = True) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Stream answer with English response and (Author, Year) citations.
+        Yields frontend-compatible SSE chunks: search_complete, generation_start, token, complete.
+        """
+        search_results = self.search_documents(question, top_k=top_k)
+
+        if not search_results:
+            yield {
+                'type': 'complete',
+                'answer': "I couldn't find relevant information in the indexed documents to answer your question.",
+                'confidence': 0.0,
+                'total_sources': 0,
+                'sources': [],
+                'enhanced': True,
+                'generation_mode': 'rag_v3'
+            }
+            return
+
+        yield {'type': 'search_complete', 'sources_found': len(search_results)}
+
+        _, system_prompt = self._build_context_and_prompt(search_results)
+
+        yield {'type': 'generation_start'}
+
+        full_answer = ""
+        async for token in self.llm_client.generate_response_stream(
+            prompt=question,
+            system_prompt=system_prompt,
+            max_tokens=2048,
+            temperature=0.3
+        ):
+            full_answer += token
+            yield {'type': 'token', 'content': token}
+
+        confidences = [r.get('similarity', 0) for r in search_results]
+        avg_confidence = sum(confidences[:3]) / min(3, len(confidences)) if confidences else 0
+
+        sources = self._build_sources(search_results) if include_sources else []
+
+        yield {
+            'type': 'complete',
+            'answer': full_answer,
             'confidence': avg_confidence,
             'total_sources': len(search_results),
             'sources': sources,

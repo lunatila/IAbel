@@ -374,7 +374,10 @@ class LangChainDocumentProcessor:
                     'chunk_type': 'langchain_recursive',
                     'priority_section': priority_section,
                     'document_path': source_path,
-                    'original_metadata': document.metadata
+                    'original_metadata': {
+                        k: v for k, v in document.metadata.items()
+                        if isinstance(v, (str, int, float, bool)) or v is None
+                    }
                 }
                 
                 chunk = LangChainDocumentChunk(

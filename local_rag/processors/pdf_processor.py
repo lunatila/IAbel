@@ -177,13 +177,23 @@ class PDFProcessor:
         print(f"   🎯 Total processado: {len(pages)} páginas de {total_pages}")
         return pages
     
+    def _fix_mojibake(self, text: str) -> str:
+        """Repair UTF-8 text that was mis-decoded as Latin-1 (Ã© → é)."""
+        try:
+            return text.encode('latin-1').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return text
+
     def _clean_text(self, text: str) -> str:
         """
         Limpa e normaliza o texto extraído com foco em documentos técnicos
         """
         if not text:
             return ""
-        
+
+        # Step 0: Fix mojibake before any other processing
+        text = self._fix_mojibake(text)
+
         # Step 1: Normalize line breaks and remove excessive whitespace
         text = re.sub(r'\n+', '\n', text)
         text = re.sub(r'[ \t]+', ' ', text)

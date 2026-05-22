@@ -21,11 +21,11 @@ PyMuPDF = None
 pdfplumber = None
 
 try:
-    import PyMuPDF
+    import fitz as PyMuPDF
     PDF_EXTRACTORS.append("PyMuPDF")
     logger.info("✅ PyMuPDF available for fast PDF extraction")
 except ImportError:
-    logger.warning("⚠️ PyMuPDF not available. Install with: pip install PyMuPDF==1.23.26")
+    logger.warning("⚠️ PyMuPDF not available. Install with: pip install pymupdf")
 
 try:
     import pdfplumber  

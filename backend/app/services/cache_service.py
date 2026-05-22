@@ -6,13 +6,20 @@ Caches embeddings, search results, and frequently accessed data
 import redis
 import json
 import hashlib
-import pickle
+import io
 import numpy as np
 from typing import Any, Optional, Dict, List
 from datetime import datetime, timedelta
+from collections import OrderedDict
 import os
 from functools import wraps
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Byte prefix used to distinguish serialized numpy data from JSON
+_NUMPY_MAGIC = b'\x93NUMPY'
 
 
 class CacheService:
@@ -38,19 +45,18 @@ class CacheService:
         self.embedding_ttl = embedding_ttl
         self.search_ttl = search_ttl
         
+        self._memory_maxsize = 1000  # max keys for in-memory LRU cache
+
         try:
-            # Try to connect to Redis
             self.redis_client = redis.from_url(redis_url, decode_responses=False)
-            # Test connection
             self.redis_client.ping()
             self.redis_available = True
-            print("✅ Redis cache service connected")
+            logger.info("Redis cache service connected")
         except (redis.ConnectionError, redis.RedisError) as e:
-            print(f"⚠️ Redis not available: {e}")
-            print("   Falling back to in-memory cache")
+            logger.warning("Redis not available: %s — using in-memory cache", e)
             self.redis_available = False
-            self.memory_cache = {}
-            self.cache_timestamps = {}
+            self.memory_cache: OrderedDict = OrderedDict()   # LRU order
+            self.cache_timestamps: dict = {}
     
     def _generate_cache_key(self, prefix: str, data: Any) -> str:
         """
@@ -69,31 +75,29 @@ class CacheService:
         return f"{prefix}:{hash_obj.hexdigest()}"
     
     def _serialize_data(self, data: Any) -> bytes:
-        """
-        Serialize data for storage (handles numpy arrays)
-        """
+        """Serialize data for storage. Uses numpy format for arrays, JSON for everything else."""
+        if isinstance(data, np.ndarray):
+            buf = io.BytesIO()
+            np.save(buf, data)
+            return buf.getvalue()
+        if isinstance(data, list) and data and isinstance(data[0], np.ndarray):
+            buf = io.BytesIO()
+            np.save(buf, np.array(data))
+            return buf.getvalue()
         try:
-            # Handle numpy arrays specially
-            if isinstance(data, np.ndarray):
-                return pickle.dumps(data)
-            elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], np.ndarray):
-                return pickle.dumps(data)
-            else:
-                return json.dumps(data).encode('utf-8')
-        except (TypeError, ValueError):
-            # Fallback to pickle for complex objects
-            return pickle.dumps(data)
-    
+            return json.dumps(data).encode('utf-8')
+        except (TypeError, ValueError) as e:
+            raise TypeError(f"Cannot serialize cache value: {e}") from e
+
     def _deserialize_data(self, data: bytes) -> Any:
-        """
-        Deserialize data from storage
-        """
+        """Deserialize data from storage. Never uses pickle."""
+        if data[:6] == _NUMPY_MAGIC:
+            buf = io.BytesIO(data)
+            return np.load(buf, allow_pickle=False)
         try:
-            # Try JSON first (more efficient)
             return json.loads(data.decode('utf-8'))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            # Fallback to pickle for numpy arrays and complex objects
-            return pickle.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ValueError(f"Cannot deserialize cache data: {e}") from e
     
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """
@@ -111,13 +115,18 @@ class CacheService:
             if self.redis_available:
                 self.redis_client.setex(key, ttl, serialized_data)
             else:
-                # In-memory fallback
+                # LRU eviction: remove oldest entry when at capacity
+                if key not in self.memory_cache and len(self.memory_cache) >= self._memory_maxsize:
+                    oldest_key, _ = self.memory_cache.popitem(last=False)
+                    self.cache_timestamps.pop(oldest_key, None)
+                # Move to end (most recently used)
                 self.memory_cache[key] = serialized_data
+                self.memory_cache.move_to_end(key)
                 self.cache_timestamps[key] = datetime.now() + timedelta(seconds=ttl)
-                
+
             return True
         except Exception as e:
-            print(f"Cache set error: {e}")
+            logger.warning("Cache set error: %s", e)
             return False
     
     def get(self, key: str) -> Optional[Any]:
@@ -145,7 +154,7 @@ class CacheService:
             
             return None
         except Exception as e:
-            print(f"Cache get error: {e}")
+            logger.warning("Cache get error: %s", e)
             return None
     
     def delete(self, key: str) -> bool:
@@ -161,7 +170,7 @@ class CacheService:
                     del self.cache_timestamps[key]
             return True
         except Exception as e:
-            print(f"Cache delete error: {e}")
+            logger.warning("Cache delete error: %s", e)
             return False
     
     def cache_embedding(self, text: str, embedding: np.ndarray) -> bool:
@@ -264,7 +273,7 @@ class CacheService:
             
             return True
         except Exception as e:
-            print(f"Cache clear error: {e}")
+            logger.warning("Cache clear error: %s", e)
             return False
     
     def get_cache_stats(self) -> Dict[str, Any]:
