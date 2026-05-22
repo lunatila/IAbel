@@ -1,72 +1,76 @@
 <div align="center">
   <img src="frontend/src/images/IAbel_transp.png" alt="IAbel Logo" width="120" />
 
-  # IAbel — Agente IA para Engenharia de Reservatórios
+  # IAbel — AI Agent for Reservoir Engineering
 
-  **RAG system especializado em engenharia de reservatórios de petróleo**
+  **A multilingual RAG system specialized in petroleum reservoir engineering, with a primary focus on Brazilian Portuguese technical documentation.**
 
   [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://python.org)
   [![FastAPI](https://img.shields.io/badge/FastAPI-0.108-009688?logo=fastapi)](https://fastapi.tiangolo.com)
   [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://reactjs.org)
   [![TypeScript](https://img.shields.io/badge/TypeScript-5.2-3178C6?logo=typescript)](https://typescriptlang.org)
   [![ChromaDB](https://img.shields.io/badge/ChromaDB-0.5-orange)](https://www.trychroma.com)
-  [![License](https://img.shields.io/badge/Licença-Acadêmica-green)](LICENSE)
+  [![License](https://img.shields.io/badge/License-Academic-green)](LICENSE)
 
 </div>
 
 ---
 
-## Sobre o Projeto
+## About
 
-O **IAbel** é um assistente de IA especializado em engenharia de reservatórios de petróleo. Ele usa um pipeline de **RAG (Retrieval-Augmented Generation)** para responder perguntas técnicas com base em documentos indexados — manuais, artigos acadêmicos e dissertações da área.
+**IAbel** is an AI-powered assistant for petroleum reservoir engineering. It uses a **Retrieval-Augmented Generation (RAG)** pipeline to answer technical questions grounded in domain-specific documents — simulation manuals, academic papers, and dissertations.
 
-O sistema funciona **100% local** (sem enviar dados para a nuvem) e suporta consultas em **português e inglês**.
+The system is **multilingual by design**, using the `paraphrase-multilingual-mpnet-base-v2` embedding model (50+ languages), and is optimized for **Brazilian Portuguese** technical terminology — including specialized acronyms such as INSIM, BHP, PVT, EOR, WAG, and CRM. It also supports English queries natively through its v3 mode with academic citation formatting.
+
+All processing runs **fully locally** — no documents leave your machine.
 
 ---
 
 ## Screenshots
 
-### Tela Inicial
+### Welcome Screen
 
-Interface estilo ChatGPT com seletor de versão RAG e indicadores de status em tempo real.
+ChatGPT-style interface with real-time status indicators and RAG version selector.
 
-![Tela Inicial](docs/screenshots/welcome.png)
+![Welcome Screen](docs/screenshots/welcome.png)
 
-### Conversa com Respostas e Citações
+### Chat with Citations
 
-Resposta com **95% de confiança**, contexto extraído dos documentos indexados e referências acadêmicas automáticas.
+Response with **95% confidence score**, context extracted from indexed documents and automatic academic references.
 
-![Chat em andamento](docs/screenshots/chat.png)
+![Chat](docs/screenshots/chat.png)
 
-### Dashboard de Status do Sistema
+### System Status Dashboard
 
-**1792 documentos indexados** · LLM Online (Gemini Flash) · 10 capacidades ativas simultaneamente.
+**1,792 documents indexed** · LLM Online (Gemini Flash) · 10 capabilities active simultaneously.
 
-![Status do Sistema](docs/screenshots/status.png)
+![System Status](docs/screenshots/status.png)
 
 ---
 
-## Funcionalidades
+## Features
 
-| Funcionalidade | Descrição |
+| Feature | Description |
 |---|---|
-| **Chat RAG Multilíngue** | Respostas em PT/BR e EN com base nos documentos indexados |
-| **3 Versões de RAG** | v1 Básico · v2 Avançado com RAG Fusion · v3 English + Citações Acadêmicas |
-| **Streaming em tempo real** | Respostas aparecem token a token via WebSocket |
-| **Upload de PDFs** | Adicione novos documentos e eles são indexados automaticamente |
-| **Citações acadêmicas** | O modo v3 rastreia e formata as fontes consultadas |
-| **Memória de conversa** | O histórico da sessão é mantido para contexto contínuo |
-| **Fine-tuning LoRA** | Pipeline para ajuste fino do LLM com dados do domínio |
-| **Dashboard de monitoramento** | Visualização em tempo real de LLM, vectorstore, cache e erros |
+| **Multilingual RAG** | Queries in Portuguese and English — simultaneously processed |
+| **3 RAG Modes** | v1 Basic · v2 Advanced with RAG Fusion · v3 English + Academic Citations |
+| **Real-time Streaming** | Token-by-token responses via WebSocket |
+| **PDF Upload** | Add new documents and they are indexed automatically |
+| **Academic Citations** | v3 mode tracks and formats consulted sources |
+| **Conversation Memory** | Session history is maintained for continuous context |
+| **LoRA Fine-tuning** | Pipeline to fine-tune the LLM on domain-specific data |
+| **Monitoring Dashboard** | Real-time view of LLM, vectorstore, cache and errors |
+| **Priority Boosting** | Abstracts (+40%), definitions (+50%), equations (+20%) ranked higher |
+| **Context Compression** | Reduces retrieved context while preserving relevance (target ratio: 0.8) |
 
 ---
 
-## Arquitetura
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
-│              Frontend  (React + TypeScript)      │
-│  Chat Interface · Upload · System Status         │
+│           Frontend  (React + TypeScript)         │
+│  Chat Interface · PDF Upload · System Status     │
 │  WebSocket streaming · RAG v1 / v2 / v3          │
 └─────────────────────┬───────────────────────────┘
                       │ HTTP / WebSocket
@@ -75,86 +79,86 @@ Resposta com **95% de confiança**, contexto extraído dos documentos indexados 
 │                                                  │
 │  ┌─────────────────────────────────────────┐    │
 │  │            RAG Pipeline                 │    │
-│  │  1. Query expansion (5 variações)       │    │
-│  │  2. Busca vetorial (ChromaDB)           │    │
-│  │  3. RAG Fusion + reranking              │    │
-│  │  4. Compressão de contexto              │    │
-│  │  5. Geração (Gemini / Ollama)           │    │
-│  │  6. Rastreamento de citações            │    │
+│  │  1. Multi-query expansion (5 variants)  │    │
+│  │  2. Vector search (ChromaDB)            │    │
+│  │  3. RAG Fusion + cross-encoder rerank   │    │
+│  │  4. Context compression                 │    │
+│  │  5. Generation (Gemini / Ollama)        │    │
+│  │  6. Citation tracking                   │    │
 │  └─────────────────────────────────────────┘    │
 └────────┬────────────────────────┬───────────────┘
          │                        │
 ┌────────▼──────────┐   ┌─────────▼──────────────┐
 │  ChromaDB         │   │  Google Gemini / Ollama  │
-│  Embeddings 768D  │   │  LLM para geração       │
-│  HNSW indexing    │   │                         │
+│  768D Embeddings  │   │  LLM for generation      │
+│  HNSW indexing    │   │                          │
 └───────────────────┘   └─────────────────────────┘
          │
 ┌────────▼──────────┐
 │  Redis Cache      │
-│  TTL + embedding  │
+│  TTL + embeddings │
 └───────────────────┘
 ```
 
 ---
 
-## Stack Tecnológica
+## Tech Stack
 
 ### Backend
-- **[FastAPI](https://fastapi.tiangolo.com)** — API REST + WebSocket
-- **[ChromaDB](https://www.trychroma.com)** — banco vetorial com HNSW
-- **[Sentence Transformers](https://www.sbert.net)** — embeddings multilíngues 768D (`paraphrase-multilingual-mpnet-base-v2`)
-- **[Google Gemini](https://ai.google.dev)** — LLM principal (ou Ollama para uso offline)
-- **[Redis](https://redis.io)** — cache multi-camada
-- **[LangChain](https://langchain.com)** — processamento de documentos
-- **[PEFT / LoRA](https://huggingface.co/docs/peft)** — fine-tuning eficiente do LLM
+- **[FastAPI](https://fastapi.tiangolo.com)** — REST API + WebSocket
+- **[ChromaDB](https://www.trychroma.com)** — vector store with HNSW indexing
+- **[Sentence Transformers](https://www.sbert.net)** — multilingual 768D embeddings (`paraphrase-multilingual-mpnet-base-v2`)
+- **[Google Gemini](https://ai.google.dev)** — primary LLM (or Ollama for fully offline use)
+- **[Redis](https://redis.io)** — multi-layer caching
+- **[LangChain](https://langchain.com)** — document processing pipeline
+- **[PEFT / LoRA](https://huggingface.co/docs/peft)** — parameter-efficient LLM fine-tuning
 
 ### Frontend
 - **[React 18](https://react.dev)** + **[TypeScript](https://typescriptlang.org)**
 - **[Vite](https://vitejs.dev)** — build tool
-- **[TailwindCSS](https://tailwindcss.com)** — estilização
-- **[Framer Motion](https://www.framer.motion.com)** — animações
-- **[Zustand](https://zustand-demo.pmnd.rs)** — gerenciamento de estado
-- **[Axios](https://axios-http.com)** — cliente HTTP
+- **[TailwindCSS](https://tailwindcss.com)** — styling
+- **[Framer Motion](https://www.framer.motion.com)** — animations
+- **[Zustand](https://zustand-demo.pmnd.rs)** — state management
+- **[Axios](https://axios-http.com)** — HTTP client
 
 ---
 
-## Pré-requisitos
+## Requirements
 
-| Requisito | Versão mínima |
+| Requirement | Minimum version |
 |---|---|
 | Python | 3.12+ |
 | Node.js | 18+ |
-| Redis | 7+ (opcional, usa cache em memória como fallback) |
+| Redis | 7+ (optional — falls back to in-memory cache) |
 | Google Gemini API Key | — |
 
-**Requisitos de hardware:**
-- RAM: 4 GB mínimo (8 GB recomendado)
-- Disco: ~3 GB para modelos de embedding
-- GPU: opcional (acelera embeddings)
+**Hardware:**
+- RAM: 4 GB minimum (8 GB recommended)
+- Disk: ~3 GB for embedding models
+- GPU: optional (accelerates embedding generation)
 
 ---
 
-## Instalação
+## Installation
 
-### 1. Clone o repositório
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/lunatila/IAbel.git
 cd IAbel
 ```
 
-### 2. Configure as variáveis de ambiente
+### 2. Configure environment variables
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-Edite `backend/.env` e adicione sua chave da API:
+Edit `backend/.env` and add your API key:
 
 ```env
 LLM_PROVIDER=gemini
-GOOGLE_API_KEY=sua_chave_aqui
+GOOGLE_API_KEY=your_key_here
 GEMINI_MODEL=gemini-flash-latest
 ```
 
@@ -164,7 +168,7 @@ GEMINI_MODEL=gemini-flash-latest
 cd backend
 python3 -m venv venv
 source venv/bin/activate        # Linux/macOS
-# ou: venv\Scripts\activate     # Windows
+# or: venv\Scripts\activate     # Windows
 
 pip install -r requirements.txt
 ```
@@ -178,7 +182,7 @@ npm install
 
 ---
 
-## Executando o Projeto
+## Running
 
 ### Linux / macOS / WSL
 
@@ -195,11 +199,11 @@ cd frontend
 npm run dev
 ```
 
-### Windows (nativo)
+### Windows (native)
 
 **Terminal 1 — Backend (via WSL):**
 ```bash
-wsl bash -c "cd /caminho/para/IAbel/backend && python3.12 run_windows.py"
+wsl bash -c "cd /path/to/IAbel/backend && python3.12 run_windows.py"
 ```
 
 **Terminal 2 — Frontend:**
@@ -208,57 +212,57 @@ cd frontend
 npm run dev
 ```
 
-### Acessar
+### Access
 
-| Serviço | URL |
+| Service | URL |
 |---|---|
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:8000 |
-| Swagger (docs) | http://localhost:8000/docs |
+| Swagger Docs | http://localhost:8000/docs |
+
+> **Note:** On first startup, the embedding model (~430 MB) is loaded into memory. Expect a 1–5 minute initialization time.
 
 ---
 
-## Adicionando Documentos
+## Adding Documents
 
-Coloque seus PDFs na pasta `backend/data/pdfs/` e use a interface de upload ou chame o endpoint de reindexação:
+Place your PDFs in `backend/data/pdfs/` and trigger reindexing:
 
 ```bash
 curl -X POST http://localhost:8000/reindex/
 ```
 
-Ou faça upload direto pela interface web em http://localhost:3000.
+Or use the upload interface at http://localhost:3000.
 
 ---
 
-## Modos de RAG
+## RAG Modes
 
-O IAbel oferece três versões do pipeline RAG, selecionáveis na interface:
-
-| Modo | Descrição | Melhor para |
+| Mode | Description | Best for |
 |---|---|---|
-| **v1** | RAG básico com busca semântica | Perguntas simples e diretas |
-| **v2** | RAG Fusion + compressão de contexto + feedback learning | Perguntas complexas em português |
-| **v3** | English + citações acadêmicas formatadas | Uso acadêmico com referências |
+| **v1** | Basic semantic search RAG | Simple, direct questions |
+| **v2** | RAG Fusion + context compression + feedback learning | Complex queries in Portuguese |
+| **v3** | English + formatted academic citations | Academic use with references |
 
 ---
 
-## Estrutura do Projeto
+## Project Structure
 
 ```
 IAbel/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py               # Servidor FastAPI + endpoints
+│   │   ├── main.py               # FastAPI server + endpoints
 │   │   ├── services/
-│   │   │   ├── rag_service.py    # Orquestrador do pipeline RAG
-│   │   │   └── cache_service.py  # Serviço de cache Redis
+│   │   │   ├── rag_service.py    # RAG pipeline orchestrator
+│   │   │   └── cache_service.py  # Redis cache service
 │   │   └── utils/
 │   │       └── logging_config.py
-│   ├── fine_tuning/              # Pipeline de fine-tuning LoRA
+│   ├── fine_tuning/              # LoRA fine-tuning pipeline
 │   ├── data/
-│   │   └── pdfs/                 # Adicione seus PDFs aqui
+│   │   └── pdfs/                 # Place your PDFs here
 │   ├── requirements.txt
-│   └── run_windows.py            # Script de inicialização no Windows
+│   └── run_windows.py            # Windows startup script (WSL)
 │
 ├── frontend/
 │   └── src/
@@ -266,19 +270,19 @@ IAbel/
 │       │   ├── chat/             # ChatInterface, ChatMessage, WelcomeScreen
 │       │   ├── dashboard/        # SystemStatus
 │       │   ├── upload/           # PDFUpload
-│       │   └── ui/               # Componentes base
-│       ├── services/api.ts       # Cliente da API
-│       └── stores/appStore.ts    # Estado global (Zustand)
+│       │   └── ui/               # Base components
+│       ├── services/api.ts       # API client
+│       └── stores/appStore.ts    # Global state (Zustand)
 │
-├── local_rag/                    # Módulo RAG avançado
-│   ├── embeddings/               # Modelos de embedding locais
-│   ├── vectorstore/              # Interface ChromaDB
-│   ├── fusion/                   # RAG Fusion
-│   ├── citations/                # Rastreamento de citações
-│   ├── memory/                   # Memória de conversa
-│   └── models/                   # Clientes Gemini e Ollama
+├── local_rag/                    # Advanced RAG module
+│   ├── embeddings/               # Local embedding models
+│   ├── vectorstore/              # ChromaDB interface
+│   ├── fusion/                   # RAG Fusion implementation
+│   ├── citations/                # Citation tracking
+│   ├── memory/                   # Conversation memory
+│   └── models/                   # Gemini and Ollama clients
 │
-├── scripts/                      # Scripts de indexação e testes
+├── scripts/                      # Indexing and testing scripts
 ├── docker-compose.yml
 └── README.md
 ```
@@ -287,58 +291,58 @@ IAbel/
 
 ## API Reference
 
-### Endpoints principais
+### Main endpoints
 
 ```
-POST /chat/             — Enviar mensagem (RAG padrão)
-POST /chat/stream/      — Streaming de resposta (SSE)
-WS   /chat/stream       — WebSocket para streaming
-POST /upload-pdf/       — Upload de novo documento
-POST /reindex/          — Reindexar todos os PDFs
-GET  /status/           — Status do sistema
+POST /chat/             — Send message (standard RAG)
+POST /chat/stream/      — Streaming response (SSE)
+WS   /chat/stream       — WebSocket streaming
+POST /upload-pdf/       — Upload new document
+POST /reindex/          — Reindex all PDFs
+GET  /status/           — System status
 GET  /health/           — Health check
-POST /feedback/         — Submeter feedback de resposta
+POST /feedback/         — Submit response feedback
 ```
 
-Documentação interativa completa em http://localhost:8000/docs
+Full interactive documentation at http://localhost:8000/docs
 
 ---
 
-## Fine-tuning LoRA (opcional)
+## LoRA Fine-tuning (optional)
 
-O projeto inclui um pipeline de fine-tuning com LoRA para adaptar o LLM ao domínio de reservatórios:
+The project includes a LoRA fine-tuning pipeline to adapt the LLM to reservoir engineering terminology:
 
 ```bash
 cd backend/fine_tuning
-python train_lora_light.py    # versão leve, recomendada para começar
+python train_lora_light.py    # lightweight version — recommended to start
 ```
 
-Modelos treinados ficam em `backend/fine_tuning/outputs/`.
+Trained models are saved to `backend/fine_tuning/outputs/`.
 
 ---
 
-## Usando com Docker
+## Docker
 
 ```bash
 docker compose up -d
 ```
 
-Serviços iniciados: backend, frontend, Redis, ChromaDB.
+Starts: backend, frontend, Redis, ChromaDB.
 
 ---
 
 ## Troubleshooting
 
-**Backend demora para iniciar**
-> Normal — os modelos de embedding (~430 MB) são carregados na memória na primeira execução. Aguarde ~1–5 minutos.
+**Backend takes long to start**
+> Normal — embedding models (~430 MB) are loaded into memory on first run. Wait 1–5 minutes.
 
-**`ModuleNotFoundError` ao iniciar**
-> Verifique se o ambiente virtual está ativado e execute `pip install -r requirements.txt`.
+**`ModuleNotFoundError` on startup**
+> Make sure the virtual environment is activated and run `pip install -r requirements.txt`.
 
-**Frontend não conecta ao backend**
-> Confirme que o backend está rodando em http://localhost:8000. Verifique o CORS em `backend/app/main.py`.
+**Frontend cannot connect to backend**
+> Confirm the backend is running at http://localhost:8000 and check CORS settings in `backend/app/main.py`.
 
-**Porta 8000 já em uso**
+**Port 8000 already in use**
 ```bash
 # Linux/macOS
 lsof -ti:8000 | xargs kill -9
@@ -349,23 +353,23 @@ Get-Process -Id (Get-NetTCPConnection -LocalPort 8000).OwningProcess | Stop-Proc
 
 ---
 
-## Contribuindo
+## Contributing
 
-1. Fork o projeto
-2. Crie uma branch: `git checkout -b feature/minha-feature`
-3. Commit: `git commit -m 'feat: adiciona minha feature'`
-4. Push: `git push origin feature/minha-feature`
-5. Abra um Pull Request
+1. Fork the project
+2. Create a branch: `git checkout -b feature/my-feature`
+3. Commit: `git commit -m 'feat: add my feature'`
+4. Push: `git push origin feature/my-feature`
+5. Open a Pull Request
 
 ---
 
-## Licença
+## License
 
-Projeto de uso acadêmico/educacional. Desenvolvido como parte de pesquisa de doutorado.
+Academic/educational use. Developed as part of doctoral research.
 
 ---
 
 <div align="center">
-  Desenvolvido para auxiliar engenheiros de reservatórios com documentação técnica especializada.<br/>
+  Built to help reservoir engineers navigate specialized technical documentation.<br/>
   <img src="frontend/src/images/IAbel_cigarro.png" alt="IAbel" width="48" />
 </div>
