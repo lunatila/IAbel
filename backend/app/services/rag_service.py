@@ -37,7 +37,7 @@ except ImportError as e:
 try:
     from local_rag.rag_v3_system import RAGv3System
     RAG_V3_AVAILABLE = True
-    print("✅ RAG v3 System available (English + Academic Citations)")
+    print("✅ RAG v3 System available (Portuguese + Academic Citations)")
 except ImportError as e:
     print(f"⚠️ RAG v3 System not available: {e}")
     RAG_V3_AVAILABLE = False
@@ -479,7 +479,7 @@ class EnhancedRAGService(LoggerMixin):
                              top_k: int = 6,
                              include_sources: bool = True) -> Dict[str, Any]:
         """
-        Ask question using RAG v3 system (English responses with academic citations)
+        Ask question using RAG v3 system (Portuguese responses with academic citations)
 
         Args:
             question: User question
@@ -489,7 +489,7 @@ class EnhancedRAGService(LoggerMixin):
         """
         if not self.rag_v3_system:
             return {
-                'answer': "RAG v3 system is not available. Please check system configuration.",
+                'answer': "O sistema RAG v3 não está disponível. Verifique a configuração do backend.",
                 'confidence': 0.0,
                 'conversation_id': conversation_id or str(uuid.uuid4()),
                 'total_sources': 0,
@@ -562,7 +562,7 @@ class EnhancedRAGService(LoggerMixin):
         if not self.rag_v3_system:
             yield {
                 'type': 'complete',
-                'answer': "RAG v3 system is not available.",
+                'answer': "O sistema RAG v3 não está disponível.",
                 'confidence': 0.0,
                 'conversation_id': conversation_id or str(uuid.uuid4()),
                 'total_sources': 0,

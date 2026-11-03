@@ -1,10 +1,11 @@
 """
-RAG v3 System - English responses with (Author, Year) citations
+RAG v3 System - Portuguese responses with (Author, Year) citations
 Uses Google Gemini API and enhanced metadata extraction
 """
 
 import os
 import sys
+import unicodedata
 from typing import AsyncIterator, List, Dict, Any, Optional
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from citations.metadata_extractor_v3 import MetadataExtractorV3, DocumentMetadat
 
 class RAGv3System:
     """
-    RAG v3 System with English responses and academic citations
+    RAG v3 System with Portuguese responses and academic citations
     """
 
     def __init__(self,
@@ -76,6 +77,25 @@ class RAGv3System:
 
         print("✅ RAG v3 System initialized")
 
+    @staticmethod
+    def _drop_repeated_boilerplate(chunks: list, max_len: int = 200) -> list:
+        """
+        Remove chunks curtos cujo texto se repete em várias páginas do mesmo documento
+        (cabeçalho de slide, folha de título). Sem conteúdo próprio, eles casavam com
+        perguntas genéricas e ocupavam as vagas de fonte na busca.
+        """
+        pages_by_text: Dict[str, set] = {}
+        for chunk in chunks:
+            key = ' '.join(chunk.content.split())
+            pages_by_text.setdefault(key, set()).add(chunk.page_number)
+        kept = [
+            c for c in chunks
+            if not (len(c.content) <= max_len and len(pages_by_text[' '.join(c.content.split())]) > 1)
+        ]
+        if len(kept) != len(chunks):
+            print(f"   🧹 Dropped {len(chunks) - len(kept)} repeated header/boilerplate chunks")
+        return kept
+
     def index_pdf_directory(self, pdf_directory: str, force_reindex: bool = False) -> bool:
         """
         Index PDF directory with enhanced metadata extraction
@@ -109,6 +129,15 @@ class RAGv3System:
                     print(f"✅ Vector store already has {stats['vector_store']['total_documents']} documents")
                     print("   Use force_reindex=True to reindex")
                     return True
+            else:
+                # Sem limpar, cada reindexação acrescentava uma cópia inteira do acervo
+                print("🧹 Clearing existing index before reindexing...")
+                if not self.vector_store.clear_collection():
+                    return False
+
+            catalog_path = Path(pdf_directory).parent / "catalogo_bibliografico.json"
+            self.metadata_extractor.catalog = MetadataExtractorV3.load_catalog(str(catalog_path))
+            print(f"📚 Bibliographic catalog: {len(self.metadata_extractor.catalog)} entries ({catalog_path})")
 
             # Process each PDF
             all_chunks = []
@@ -124,10 +153,12 @@ class RAGv3System:
                 print(f"   👤 Author(s): {', '.join(metadata.authors)}")
                 print(f"   📅 Year: {metadata.year or 'Unknown'}")
                 print(f"   📖 Title: {metadata.title}")
+                if unicodedata.normalize('NFC', pdf_file) not in self.metadata_extractor.catalog:
+                    print("   ⚠️ Not in catalogo_bibliografico.json — citation guessed automatically")
 
                 # Process PDF into chunks
                 print("   🔨 Creating chunks...")
-                chunks = self.pdf_processor.process_pdf(pdf_path)
+                chunks = self._drop_repeated_boilerplate(self.pdf_processor.process_pdf(pdf_path))
 
                 # Enhance chunk metadata with author/year
                 for chunk in chunks:
@@ -203,13 +234,13 @@ class RAGv3System:
                     top_k: int = 8,
                     include_sources: bool = True) -> Dict[str, Any]:
         """
-        Answer question with English response and (Author, Year) citations.
+        Answer question with Portuguese response and (Author, Year) citations.
         """
         search_results = self.search_documents(question, top_k=top_k)
 
         if not search_results:
             return {
-                'answer': "I couldn't find relevant information in the indexed documents to answer your question.",
+                'answer': "Não encontrei informações relevantes nos documentos indexados para responder à sua pergunta.",
                 'confidence': 0.0,
                 'total_sources': 0,
                 'sources': []
@@ -260,7 +291,8 @@ Before writing your answer, reason through the question step by step:
 5. Only then compose the final answer
 
 INSTRUCTIONS:
-- Answer in English with technical precision
+- Answer in Brazilian Portuguese with technical precision, even when the reference documents are in English
+- Keep established English technical terms and model names as they are (e.g. CRM, INSIM-FT, front tracking)
 - Synthesize and summarize information from the reference documents to answer the question fully
 - Use inline citations in (Author, Year) format when referencing specific claims, e.g. (Silva et al., 2022)
 - You may draw technical inferences from the provided content where they are clearly supported
@@ -289,7 +321,7 @@ INSTRUCTIONS:
                                   top_k: int = 8,
                                   include_sources: bool = True) -> AsyncIterator[Dict[str, Any]]:
         """
-        Stream answer with English response and (Author, Year) citations.
+        Stream answer with Portuguese response and (Author, Year) citations.
         Yields frontend-compatible SSE chunks: search_complete, generation_start, token, complete.
         """
         search_results = self.search_documents(question, top_k=top_k)
@@ -297,7 +329,7 @@ INSTRUCTIONS:
         if not search_results:
             yield {
                 'type': 'complete',
-                'answer': "I couldn't find relevant information in the indexed documents to answer your question.",
+                'answer': "Não encontrei informações relevantes nos documentos indexados para responder à sua pergunta.",
                 'confidence': 0.0,
                 'total_sources': 0,
                 'sources': [],
@@ -352,14 +384,14 @@ INSTRUCTIONS:
                 },
                 'embedder': {
                     'model': self.embedder.model_name,
-                    'dimension': self.embedder.dimension
+                    'dimension': self.embedder.get_embedding_dimension()
                 },
                 'llm': {
                     'provider': 'gemini',
                     'model': self.llm_client.model_name
                 },
                 'features': {
-                    'language': 'English',
+                    'language': 'Portuguese',
                     'citation_format': '(Author, Year)',
                     'metadata_extraction': True
                 }
