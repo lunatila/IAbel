@@ -37,8 +37,22 @@ class GeminiClient:
         self.model_name = model_name
         self.timeout = timeout
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+        # Modelos 2.5+ "pensam" antes de responder e esses tokens contam no maxOutputTokens;
+        # sem orçamento explícito o raciocínio consumia o limite e a resposta saía cortada.
+        # Com 0 o raciocínio pedido no prompt do RAG v3 aparece na resposta.
+        self.thinking_budget = int(os.getenv('GEMINI_THINKING_BUDGET', '1024'))
 
-        logger.info("Google Gemini configurado: %s", model_name)
+        logger.info("Google Gemini configurado: %s (thinking budget: %d)", model_name, self.thinking_budget)
+
+    def _generation_config(self, max_tokens: int, temperature: float) -> dict:
+        """max_tokens é o limite da resposta; o orçamento de raciocínio é somado à parte."""
+        return {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens + self.thinking_budget,
+            "topP": 0.95,
+            "topK": 40,
+            "thinkingConfig": {"thinkingBudget": self.thinking_budget},
+        }
 
     def generate_response(self,
                           prompt: str,
@@ -49,12 +63,7 @@ class GeminiClient:
         url = f"{self.base_url}/models/{self.model_name}:generateContent"
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens,
-                "topP": 0.95,
-                "topK": 40
-            }
+            "generationConfig": self._generation_config(max_tokens, temperature),
         }
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
@@ -145,12 +154,7 @@ INSTRUÇÕES:
         url = f"{self.base_url}/models/{self.model_name}:streamGenerateContent"
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens,
-                "topP": 0.95,
-                "topK": 40,
-            }
+            "generationConfig": self._generation_config(max_tokens, temperature),
         }
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
@@ -178,7 +182,10 @@ INSTRUÇÕES:
                     detail = response.text
                 raise RuntimeError(f"Gemini API error {response.status_code}: {detail}")
 
-            # Successful response — stream tokens
+            # Successful response — stream tokens.
+            # A API responde "text/event-stream" sem charset e o requests assume ISO-8859-1,
+            # o que transformava "não" em "nÃ£o"; o corpo é sempre UTF-8.
+            response.encoding = "utf-8"
             try:
                 for raw_line in response.iter_lines(decode_unicode=True):
                     if not raw_line or not raw_line.startswith("data: "):

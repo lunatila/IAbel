@@ -638,7 +638,7 @@ FORMATO DE RESPOSTA:
             answer = self.llm_client.generate_response(
                 prompt=question,
                 system_prompt=system_prompt,
-                max_tokens=1000,
+                max_tokens=2048,
                 temperature=0.7
             )
             
@@ -967,7 +967,7 @@ FORMATO DE RESPOSTA:
             async for token in self.llm_client.generate_response_stream(
                 prompt=question,
                 system_prompt=system_prompt,
-                max_tokens=1000,
+                max_tokens=2048,
                 temperature=0.7
             ):
                 full_answer += token
