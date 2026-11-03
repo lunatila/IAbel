@@ -4,7 +4,7 @@ import { Send, Loader2, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { apiService } from '../../services/api';
 import { Message, Source } from '../../types';
-import ChatMessage from './ChatMessage';
+import ChatMessage, { renderMessageContent } from './ChatMessage';
 import WelcomeScreen from './WelcomeScreen';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
@@ -76,7 +76,8 @@ const ChatInterface: React.FC = () => {
   } = useAppStore();
 
   const [inputValue, setInputValue] = useState('');
-  const [ragMode, setRagMode] = useState<'rag_v1' | 'rag_v2' | 'rag_v3'>('rag_v2');
+  // Único modo exposto: o v3 usa o índice mais completo e cita (Autor, Ano) no texto
+  const ragMode = 'rag_v3' as const;
   const [messageQuestions, setMessageQuestions] = useState<Map<string, string>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamingContentRef = useRef<string>('');
@@ -347,11 +348,7 @@ const ChatInterface: React.FC = () => {
       {messages.length === 0 && !currentStreamingMessage ? (
         /* Welcome Screen with centered input */
         <div className="flex-1 flex flex-col items-center justify-center px-4">
-          <WelcomeScreen
-            onSuggestedQuestion={handleSuggestedQuestion}
-            ragMode={ragMode}
-            onRagModeChange={setRagMode}
-          />
+          <WelcomeScreen onSuggestedQuestion={handleSuggestedQuestion} />
 
           {/* Centered Input */}
           <div className="w-full max-w-3xl mt-8">
@@ -416,22 +413,7 @@ const ChatInterface: React.FC = () => {
                       IAbel
                     </div>
                     <div className="text-[15px] leading-7 text-gray-800 dark:text-gray-200">
-                      {currentStreamingMessage.split('\n').map((line, index) => {
-                        if (line.trim() === '') return <br key={index} />;
-
-                        const formattedLine = line
-                          .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
-                          .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
-                          .replace(/•/g, '•');
-
-                        return (
-                          <p
-                            key={index}
-                            className="mb-3 last:mb-0"
-                            dangerouslySetInnerHTML={{ __html: formattedLine }}
-                          />
-                        );
-                      })}
+                      {renderMessageContent(currentStreamingMessage)}
                       <span className="inline-block w-2 h-5 ml-1 bg-blue-500 animate-pulse"></span>
                     </div>
                   </div>
@@ -445,42 +427,6 @@ const ChatInterface: React.FC = () => {
           {/* Input Area - ChatGPT style bottom bar */}
           <div className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
             <div className="max-w-4xl mx-auto px-4 py-4">
-              {/* RAG Mode Selector - Only show when there are messages */}
-              {messages.length > 0 && (
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Modo:</span>
-                  <div className="flex gap-1">
-                    <Button
-                      variant={ragMode === 'rag_v1' ? 'primary' : 'ghost'}
-                      size="sm"
-                      onClick={() => setRagMode('rag_v1')}
-                      disabled={isLoading}
-                      className="text-xs px-3 py-1"
-                    >
-                      v1
-                    </Button>
-                    <Button
-                      variant={ragMode === 'rag_v2' ? 'primary' : 'ghost'}
-                      size="sm"
-                      onClick={() => setRagMode('rag_v2')}
-                      disabled={isLoading}
-                      className="text-xs px-3 py-1"
-                    >
-                      v2
-                    </Button>
-                    <Button
-                      variant={ragMode === 'rag_v3' ? 'primary' : 'ghost'}
-                      size="sm"
-                      onClick={() => setRagMode('rag_v3')}
-                      disabled={isLoading}
-                      className="text-xs px-3 py-1"
-                    >
-                      v3
-                    </Button>
-                  </div>
-                </div>
-              )}
-
               {/* Input container - centered like ChatGPT */}
               <form onSubmit={handleSendMessage} className="relative">
                 <Input
