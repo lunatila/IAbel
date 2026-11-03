@@ -23,7 +23,7 @@ from local_rag.rag_v3_system import RAGv3System
 def main():
     print("=" * 60)
     print("RAG v3 PDF Indexing Script")
-    print("English Responses + Academic Citations (Author, Year)")
+    print("Respostas em português + citações (Autor, Ano)")
     print("=" * 60)
 
     # Paths
@@ -80,7 +80,7 @@ def main():
             print(f"   LLM: {status['llm']['provider']} - {status['llm']['model']}")
 
         print("\n✨ RAG v3 is ready to use!")
-        print("   - English responses")
+        print("   - Portuguese responses")
         print("   - Academic citations: (Author, Year)")
         print("   - No reference boxes in UI")
 

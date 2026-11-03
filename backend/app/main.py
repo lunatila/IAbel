@@ -477,7 +477,7 @@ async def chat_stream(enhanced_message: EnhancedChatMessage):
             try:
                 # Route based on mode
                 if enhanced_message.mode == 'rag_v3':
-                    # RAG v3 mode - English with academic citations (real streaming)
+                    # RAG v3 mode - Portuguese with academic citations (real streaming)
                     logger.info("Using RAG v3 mode (streaming)")
                     async for chunk in rag_service.ask_question_v3_stream(
                         question=enhanced_message.message,

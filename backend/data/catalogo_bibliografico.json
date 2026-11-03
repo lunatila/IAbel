@@ -1,0 +1,72 @@
+{
+  "_instrucoes": "Dados bibliográficos dos PDFs em backend/data/pdfs/, usados nas citações (Autor, Ano). Têm prioridade sobre a extração automática. Autores no formato 'Sobrenome, Nome'; sem autor, a citação usa o título. Após editar, reindexe com scripts/index_pdfs_v3.py.",
+  "Apresenta__o___Modelo_Capacitivo_Resistivo.pdf": {
+    "autores": [],
+    "ano": 2022,
+    "titulo": "Modelo Capacitivo-Resistivo em Reservatórios",
+    "tipo": "apresentação (29 nov. 2022)"
+  },
+  "Emilio Coutinho - PhD Dissertation_compressed.pdf": {
+    "autores": ["Coutinho, Emilio Jose Rocha"],
+    "ano": 2022,
+    "titulo": "Embedding Reservoir Physics into Machine Learning",
+    "tipo": "tese de doutorado, Texas A&M University"
+  },
+  "INSIMImplementacaoBR.pdf": {
+    "autores": [],
+    "ano": null,
+    "titulo": "INSIM-FT 3D: ideias para a nova implementação",
+    "tipo": "apresentação, P&D de Exploração e Produção"
+  },
+  "INSIMNumerico.pdf": {
+    "autores": [],
+    "ano": 2025,
+    "titulo": "INSIM Numérico",
+    "tipo": "apresentação, P&D de Exploração e Produção"
+  },
+  "INSIM_MALU.pdf": {
+    "autores": [
+      "Grave, Malú",
+      "Castro, Eduardo da Silva",
+      "Pesco, Sinesio",
+      "Barreto Junior, Abelardo Borges",
+      "Gasparini, Leonardo da Silva",
+      "Cavalcante, Rodrigo Gusmão",
+      "Alves, Regina Reis da Costa",
+      "Rodrigues, José Roberto Pereira"
+    ],
+    "ano": 2024,
+    "titulo": "A mass conservative INSIM-FT-3D physics-based data-driven oil-water reservoir simulator",
+    "tipo": "artigo, Geoenergy Science and Engineering, v. 241, 213102"
+  },
+  "Manual - INSIM_FT_compressed.pdf": {
+    "autores": ["Grave, Malú"],
+    "ano": 2024,
+    "titulo": "INSIM-FT manual, versão 1.0",
+    "tipo": "manual"
+  },
+  "Qualificação Dimary.pdf": {
+    "autores": ["Moreno López, Dimary"],
+    "ano": 2025,
+    "titulo": "INSIM Numérico: um simulador de fluxo entre poços com abordagem numérica no cálculo do perfil de saturação",
+    "tipo": "exame de qualificação, PUC-Rio"
+  },
+  "artigo_compressed.pdf": {
+    "autores": ["Li, Ying", "Onur, Mustafa"],
+    "ano": 2023,
+    "titulo": "INSIM-BHP: A physics-based data-driven reservoir model for history matching and forecasting with bottomhole pressure and production rate data under waterflooding",
+    "tipo": "artigo, Journal of Computational Physics, v. 473, 111714"
+  },
+  "guoetal_2019_INSIM-FT_gravity.pdf": {
+    "autores": ["Guo, Zhenyu", "Reynolds, Albert C."],
+    "ano": 2019,
+    "titulo": "INSIM-FT in three-dimensions with gravity",
+    "tipo": "artigo, Journal of Computational Physics, v. 380, p. 143-169"
+  },
+  "tese insim_compressed.pdf": {
+    "autores": ["Guo, Zhenyu"],
+    "ano": 2018,
+    "titulo": "History Matching, Prediction and Production Optimization with Physics-Based Data-Driven Model",
+    "tipo": "tese de doutorado, The University of Tulsa"
+  }
+}

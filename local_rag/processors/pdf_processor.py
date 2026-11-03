@@ -359,7 +359,7 @@ class PDFProcessor:
                             current_chunk += sentence + " "
                         else:
                             if current_chunk.strip():
-                                chunk_id = self._generate_chunk_id(current_chunk, doc_path, chunk_count)
+                                chunk_id = self._generate_chunk_id(current_chunk, doc_path, page_num, chunk_count)
                                 chunks.append(DocumentChunk(
                                     content=current_chunk.strip(),
                                     metadata={
@@ -391,7 +391,7 @@ class PDFProcessor:
                     else:
                         # Salva chunk atual se não vazio
                         if current_chunk.strip():
-                            chunk_id = self._generate_chunk_id(current_chunk, doc_path, chunk_count)
+                            chunk_id = self._generate_chunk_id(current_chunk, doc_path, page_num, chunk_count)
                             chunks.append(DocumentChunk(
                                 content=current_chunk.strip(),
                                 metadata={
@@ -416,7 +416,7 @@ class PDFProcessor:
             
             # Adiciona último chunk se houver conteúdo
             if current_chunk.strip():
-                chunk_id = self._generate_chunk_id(current_chunk, doc_path, chunk_count)
+                chunk_id = self._generate_chunk_id(current_chunk, doc_path, page_num, chunk_count)
                 chunks.append(DocumentChunk(
                     content=current_chunk.strip(),
                     metadata={
@@ -531,18 +531,17 @@ class PDFProcessor:
         
         return 'regular'
     
-    def _generate_chunk_id(self, content: str, doc_path: str, chunk_index: int) -> str:
+    def _generate_chunk_id(self, content: str, doc_path: str, page_num: int, chunk_index: int) -> str:
         """
-        Gera ID único para o chunk
+        Gera ID determinístico para o chunk.
+        O chunk_index reinicia a cada página, por isso a página entra no ID. Sem timestamp:
+        reindexar o mesmo PDF gera os mesmos IDs em vez de acrescentar cópias ao índice.
         """
-        import time
         import os
-        # Inclui nome do arquivo, índice, timestamp e hash do conteúdo completo para garantir unicidade
         filename = os.path.basename(doc_path)
-        timestamp = str(int(time.time() * 1000000))  # microsegundos
         content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
-        
-        source = f"{filename}_{chunk_index}_{timestamp}_{content_hash}"
+
+        source = f"{filename}_p{page_num}_{chunk_index}_{content_hash}"
         return hashlib.md5(source.encode()).hexdigest()
     
     def process_pdf(self, pdf_path: str) -> List[DocumentChunk]:

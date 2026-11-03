@@ -248,10 +248,11 @@ class LocalVectorStore:
         Remove todos os documentos da coleção
         """
         try:
-            # Obtém todos os IDs
-            all_docs = self.collection.get()
-            if all_docs['ids']:
-                self.collection.delete(ids=all_docs['ids'])
+            # Obtém todos os IDs; apaga em lotes porque o ChromaDB limita o tamanho de cada operação
+            all_ids = self.collection.get(include=[])['ids']
+            batch_size = 5000
+            for i in range(0, len(all_ids), batch_size):
+                self.collection.delete(ids=all_ids[i:i + batch_size])
             
             print("✅ Coleção limpa com sucesso")
             return True

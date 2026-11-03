@@ -1,12 +1,15 @@
 """
 Enhanced PDF Metadata Extractor for RAG v3
-Uses PyMuPDF Info dict as primary source, text heuristics as fallback.
+Uses the bibliographic catalog when the file is listed in it; otherwise
+PyMuPDF Info dict as primary source, text heuristics as fallback.
 """
 
 import re
 import os
+import json
 import logging
-from typing import List, Optional, Tuple
+import unicodedata
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -52,20 +55,21 @@ class DocumentMetadata:
     confidence: float = 0.0  # fraction of fields sourced from PDF Info dict
 
     def format_citation(self) -> str:
-        """Format as (Author, Year) or (Author et al., Year)"""
+        """Format as (Sobrenome, Ano), (A e B, Ano) or (A et al., Ano); without authors, uses the title"""
+        year_str = str(self.year) if self.year else "s.d."
         if not self.authors:
-            author = os.path.splitext(self.filename)[0]
-            year_str = str(self.year) if self.year else "n.d."
-            return f"({author}, {year_str})"
+            label = self.title or os.path.splitext(self.filename)[0]
+            return f'("{label}", {year_str})'
 
-        if len(self.authors) == 1:
-            author_str = self.authors[0]
-        elif len(self.authors) == 2:
-            author_str = f"{self.authors[0]} and {self.authors[1]}"
+        # "Sobrenome, Nome" (formato do catálogo) cita só o sobrenome
+        surnames = [a.split(',')[0].strip() for a in self.authors]
+        if len(surnames) == 1:
+            author_str = surnames[0]
+        elif len(surnames) == 2:
+            author_str = f"{surnames[0]} e {surnames[1]}"
         else:
-            author_str = f"{self.authors[0]} et al."
+            author_str = f"{surnames[0]} et al."
 
-        year_str = str(self.year) if self.year else "n.d."
         return f"({author_str}, {year_str})"
 
     def format_inline_citation(self) -> str:
@@ -156,8 +160,37 @@ class MetadataExtractorV3:
     Fallback: text heuristics on the first 3 pages.
     """
 
+    def __init__(self, catalog: Optional[Dict[str, dict]] = None):
+        # filename -> {"autores": [...], "ano": int|None, "titulo": str}
+        self.catalog = catalog or {}
+
+    @staticmethod
+    def load_catalog(path: str) -> Dict[str, dict]:
+        """Load the bibliographic catalog JSON; missing file means no overrides."""
+        if not os.path.exists(path):
+            logger.warning("Catálogo bibliográfico não encontrado: %s", path)
+            return {}
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        # Nomes vindos do Google Drive podem estar decompostos (NFD: "c" + cedilha);
+        # chaves e buscas sempre em NFC para "Qualificação" casar nas duas formas
+        return {unicodedata.normalize('NFC', k): v for k, v in data.items() if not k.startswith('_')}
+
     def extract_metadata(self, pdf_path: str) -> DocumentMetadata:
         filename = os.path.basename(pdf_path)
+
+        # A extração automática erra em teses e slides (pega "THE GRADUATE SCHOOL",
+        # nome do arquivo etc.); o catálogo é a fonte confiável quando existe.
+        entry = self.catalog.get(unicodedata.normalize('NFC', filename))
+        if entry is not None:
+            return DocumentMetadata(
+                authors=list(entry.get('autores') or []),
+                year=entry.get('ano'),
+                title=entry.get('titulo') or self._clean_filename_as_title(filename),
+                filename=filename,
+                confidence=1.0,
+            )
+
         authors: List[str] = []
         year: Optional[int] = None
         title: Optional[str] = None

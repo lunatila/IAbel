@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { User, Clock, Zap } from 'lucide-react';
-import { InlineMath, BlockMath } from 'react-katex';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { Message, Source } from '../../types';
 import Badge from '../ui/Badge';
@@ -11,52 +14,38 @@ import { CitationDisplay } from '../enhanced/CitationDisplay';
 import { apiService } from '../../services/api';
 import chatIcon from '../../images/IAbel_cigarro.png';
 
-function renderMessageContent(content: string): React.ReactNode {
-  const nodes: React.ReactNode[] = [];
-  let key = 0;
+// O Gemini também escreve LaTeX como \( \) e \[ \]; o remark-math só reconhece $ e $$,
+// e só trata $$ como equação em destaque quando os delimitadores ficam em linhas próprias.
+// "R$ 10" é moeda, não início de fórmula.
+function normalizeMathDelimiters(content: string): string {
+  return content
+    .replace(/R\$(?=\s*\d)/g, () => 'R\\$')
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n$$\n${math.trim()}\n$$\n`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math.trim()}$`)
+    .replace(/^[ \t]*\$\$([^\n]+?)\$\$[ \t]*$/gm, (_, math) => `$$\n${math.trim()}\n$$`);
+}
 
-  // Split on $$...$$ for block math
-  const blockSegments = content.split(/(\$\$[\s\S]*?\$\$)/g);
+const markdownComponents: Components = {
+  a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+  table: ({ node, ...props }) => (
+    <div className="overflow-x-auto">
+      <table {...props} />
+    </div>
+  ),
+};
 
-  for (const blockSeg of blockSegments) {
-    if (blockSeg.startsWith('$$') && blockSeg.endsWith('$$') && blockSeg.length > 4) {
-      const math = blockSeg.slice(2, -2).trim();
-      try {
-        nodes.push(<div key={key++} className="my-3 overflow-x-auto"><BlockMath math={math} /></div>);
-      } catch {
-        nodes.push(<code key={key++} className="text-sm bg-gray-100 dark:bg-gray-800 px-1 rounded">{blockSeg}</code>);
-      }
-      continue;
-    }
-
-    // Split on $...$ for inline math (no newlines inside)
-    const inlineSegments = blockSeg.split(/(\$[^$\n]+?\$)/g);
-
-    for (const inlineSeg of inlineSegments) {
-      if (inlineSeg.startsWith('$') && inlineSeg.endsWith('$') && inlineSeg.length > 2) {
-        const math = inlineSeg.slice(1, -1).trim();
-        try {
-          nodes.push(<InlineMath key={key++} math={math} />);
-        } catch {
-          nodes.push(<code key={key++} className="text-sm bg-gray-100 dark:bg-gray-800 px-1 rounded">{inlineSeg}</code>);
-        }
-        continue;
-      }
-
-      // Plain text — apply bold/italic and line breaks
-      const lines = inlineSeg.split('\n');
-      lines.forEach((line, lineIdx) => {
-        if (lineIdx > 0) nodes.push(<br key={key++} />);
-        if (!line.trim()) return;
-        const html = line
-          .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>')
-          .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
-        nodes.push(<span key={key++} dangerouslySetInnerHTML={{ __html: html }} />);
-      });
-    }
-  }
-
-  return <>{nodes}</>;
+export function renderMessageContent(content: string): React.ReactNode {
+  return (
+    <div className="prose prose-gray dark:prose-invert max-w-none prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-li:my-0.5">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={markdownComponents}
+      >
+        {normalizeMathDelimiters(content)}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 interface ChatMessageProps {
