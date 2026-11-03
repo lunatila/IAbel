@@ -461,6 +461,12 @@ async def chat_enhanced(enhanced_message: EnhancedChatMessage):
         logger.error(f"Enhanced chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def _json_default(obj):
+    """Serializa escalares/arrays numpy (ex.: scores float32) que o json padrão não aceita"""
+    if hasattr(obj, "tolist"):
+        return obj.tolist()
+    return str(obj)
+
 @app.post("/chat/stream/")
 async def chat_stream(enhanced_message: EnhancedChatMessage):
     """Streaming chat endpoint with multi-mode support"""
@@ -479,7 +485,7 @@ async def chat_stream(enhanced_message: EnhancedChatMessage):
                         top_k=enhanced_message.top_k or 8,
                         include_sources=enhanced_message.include_sources
                     ):
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                        yield f"data: {json.dumps(chunk, default=_json_default)}\n\n"
                 else:
                     # Use the direct RAG service for streaming (v1/v2)
                     async for chunk in rag_service.ask_question_stream(
@@ -488,7 +494,7 @@ async def chat_stream(enhanced_message: EnhancedChatMessage):
                         top_k=enhanced_message.top_k or 4,
                         include_sources=enhanced_message.include_sources
                     ):
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                        yield f"data: {json.dumps(chunk, default=_json_default)}\n\n"
 
                 # Send end marker
                 yield f"data: {json.dumps({'type': 'end'})}\n\n"

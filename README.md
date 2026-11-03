@@ -201,15 +201,16 @@ npm run dev
 
 ### Windows (native)
 
-**Terminal 1 — Backend (via WSL):**
-```bash
-wsl bash -c "cd /path/to/IAbel/backend && python3.12 run_windows.py"
-```
+No WSL needed. Requires Python (any version, used only to bootstrap [uv](https://docs.astral.sh/uv/)) and Node.js.
 
-**Terminal 2 — Frontend:**
+1. Run `instalar_windows.bat` once — installs Python 3.12 via uv, creates `backend\venv` with the
+   pinned Windows dependencies (`backend\requirements-windows.txt`, CPU PyTorch) and runs `npm ci`.
+2. Run `iniciar_windows.bat` — opens the backend (port 8000) and frontend (port 3000) in two windows.
+
+Manual alternative:
 ```powershell
-cd frontend
-npm run dev
+cd backend; .\venv\Scripts\python.exe run_windows.py   # Terminal 1
+cd frontend; npm run dev                               # Terminal 2
 ```
 
 ### Access
