@@ -62,9 +62,10 @@ backend/data/vectorstore/
 backend/data/vectorstore_*/
 backend/data/conversations/
 local_rag/data/
-local_rag/vectorstore/
 local_rag/vectorstore_enhanced/
-vectorstore/
+# Ignora os dados do vectorstore, mas mantém o código (chroma_store.py)
+**/vectorstore/*
+!local_rag/vectorstore/*.py
 vectorstore_*/
 test_vectorstore/
 *.db
