@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import logo from '../../images/IAbel_transp.png';
+import logo from '../../images/iabel_icon.svg';
 
 interface WelcomeScreenProps {
   onSuggestedQuestion: (question: string) => void;

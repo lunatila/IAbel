@@ -5,7 +5,9 @@ Uses Google Gemini API and enhanced metadata extraction
 
 import os
 import sys
+import hashlib
 import unicodedata
+from dataclasses import replace
 from typing import AsyncIterator, List, Dict, Any, Optional
 from pathlib import Path
 
@@ -28,8 +30,8 @@ class RAGv3System:
                  vectorstore_path: str = "data/vectorstore_v3",
                  embedder_model: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
                  llm_model: str = None,
-                 chunk_size: int = 500,
-                 chunk_overlap: int = 80):
+                 chunk_size: int = 300,
+                 chunk_overlap: int = 50):
         """
         Initialize RAG v3 System
 
@@ -96,6 +98,46 @@ class RAGv3System:
             print(f"   🧹 Dropped {len(chunks) - len(kept)} repeated header/boilerplate chunks")
         return kept
 
+    def _fit_to_token_window(self, chunks: list) -> list:
+        """
+        O modelo de embeddings só lê max_seq_length tokens (128 no mpnet multilíngue) e
+        descarta o resto em silêncio: a parte final do trecho ficava invisível para a busca.
+        O tamanho em caracteres não garante o limite (frases sem pontuação, fórmulas e
+        siglas geram muitos tokens), então os trechos longos são divididos por palavras
+        medindo com o tokenizador do próprio modelo.
+        """
+        model = self.embedder.model
+        tokenizer = model.tokenizer
+        limit = model.max_seq_length - 2  # tokens especiais de início e fim
+
+        def n_tokens(text: str) -> int:
+            return len(tokenizer(text, add_special_tokens=False)['input_ids'])
+
+        fitted, split_count = [], 0
+        for chunk in chunks:
+            if n_tokens(chunk.content) <= limit:
+                fitted.append(chunk)
+                continue
+            split_count += 1
+            parts, current = [], []
+            for word in chunk.content.split():
+                if current and n_tokens(' '.join(current + [word])) > limit:
+                    parts.append(' '.join(current))
+                    current = []
+                current.append(word)
+            if current:
+                parts.append(' '.join(current))
+            for i, part in enumerate(parts):
+                fitted.append(replace(
+                    chunk,
+                    content=part,
+                    chunk_id=hashlib.md5(f"{chunk.chunk_id}_part{i}".encode()).hexdigest(),
+                    metadata={**chunk.metadata, 'chunk_part': i},
+                ))
+        if split_count:
+            print(f"   ✂️ Split {split_count} chunks longer than {limit} tokens")
+        return fitted
+
     def index_pdf_directory(self, pdf_directory: str, force_reindex: bool = False) -> bool:
         """
         Index PDF directory with enhanced metadata extraction
@@ -159,6 +201,7 @@ class RAGv3System:
                 # Process PDF into chunks
                 print("   🔨 Creating chunks...")
                 chunks = self._drop_repeated_boilerplate(self.pdf_processor.process_pdf(pdf_path))
+                chunks = self._fit_to_token_window(chunks)
 
                 # Enhance chunk metadata with author/year
                 for chunk in chunks:

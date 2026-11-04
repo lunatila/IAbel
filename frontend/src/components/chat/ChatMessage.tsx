@@ -12,7 +12,7 @@ import { FeedbackRating } from '../feedback/FeedbackRating';
 import { EnhancedInfoDisplay } from '../enhanced/EnhancedInfoDisplay';
 import { CitationDisplay } from '../enhanced/CitationDisplay';
 import { apiService } from '../../services/api';
-import chatIcon from '../../images/IAbel_cigarro.png';
+import chatIcon from '../../images/iabel_icon.svg';
 
 // O Gemini também escreve LaTeX como \( \) e \[ \]; o remark-math só reconhece $ e $$,
 // e só trata $$ como equação em destaque quando os delimitadores ficam em linhas próprias.

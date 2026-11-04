@@ -129,8 +129,8 @@ class EnhancedRAGService(LoggerMixin):
                     vectorstore_path="data/vectorstore_v3",
                     embedder_model=embedder_model,
                     llm_model=llm_model if llm_provider == "gemini" else os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
-                    chunk_size=500,
-                    chunk_overlap=80
+                    chunk_size=300,
+                    chunk_overlap=50
                 )
                 print("✅ RAG v3 System initialized successfully")
             except Exception as e:

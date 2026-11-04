@@ -10,7 +10,7 @@ import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Badge from '../ui/Badge';
 import toast from 'react-hot-toast';
-import chatIcon from '../../images/IAbel_cigarro.png';
+import chatIcon from '../../images/iabel_icon.svg';
 
 // Helper function to clean preview text
 const cleanPreviewText = (text: string): string => {
