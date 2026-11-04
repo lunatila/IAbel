@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import logo from './images/IAbel_transp.png';
-import thinkingLogo from './images/IAbel_cigarro.png';
+import logo from './images/iabel_icon.svg';
+import thinkingLogo from './images/iabel_icon.svg';
 import upArrow from './images/up_arrow.png';
 
 interface Message {

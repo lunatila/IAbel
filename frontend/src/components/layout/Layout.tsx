@@ -13,7 +13,7 @@ import {
 import { useAppStore } from '../../stores/appStore';
 import Button from '../ui/Button';
 import Badge from '../ui/Badge';
-import logoTransparent from '../../images/IAbel_transp.png';
+import logoTransparent from '../../images/iabel_icon.svg';
 
 interface LayoutProps {
   children: React.ReactNode;
