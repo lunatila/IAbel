@@ -43,8 +43,8 @@ def main():
     rag_v3 = RAGv3System(
         vectorstore_path=str(vectorstore_path),
         embedder_model="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-        chunk_size=500,
-        chunk_overlap=80
+        chunk_size=300,  # cabe nos 128 tokens do modelo de embeddings em ~94% dos trechos
+        chunk_overlap=50
     )
 
     # Index PDFs
